@@ -19,13 +19,13 @@ const emit = defineEmits([
 <template>
   <section class="space-y-6">
     <section class="space-y-2">
-      <label for="courseInput" class="block text-sm font-medium text-slate-700">课程名（选填）</label>
+      <label for="courseInput" class="block text-sm font-medium text-slate-700">课程名（默认 C++）</label>
       <input
         id="courseInput"
         name="course"
         type="text"
         list="courseSuggestions"
-        placeholder="需要展示课程名时填写，不填则只显示班级名"
+        placeholder="默认 C++，若是其他课程请手动修改"
         autocomplete="off"
         class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         :value="props.course"
@@ -34,7 +34,7 @@ const emit = defineEmits([
       <datalist id="courseSuggestions">
         <option v-for="item in courseSuggestions" :key="item" :value="item" />
       </datalist>
-      <p class="text-xs text-slate-400">填写后会显示在班级名前；不填则仅显示班级名。</p>
+      <p class="text-xs text-slate-400">一般无需改动；零售或非 C++ 课程时，请填写真实课程名。</p>
     </section>
 
     <section class="space-y-2">

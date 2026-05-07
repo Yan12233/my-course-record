@@ -304,15 +304,18 @@ export function useExport() {
       if (!parsed) continue;
 
       const classSafe = safeTimeSlotSegmentName(rec.lessonSchedule);
+      const courseRaw = String(rec.course == null ? '' : rec.course).trim();
+      const coursePrefix = courseRaw ? safeFolderName(courseRaw) : '';
+      const classFolderName = coursePrefix ? `${coursePrefix}-${classSafe}` : classSafe;
       const dateSafe = safeLessonDateFolderName(rec);
 
-      const leafKey = `${classSafe}/${dateSafe}`;
+      const leafKey = `${classFolderName}/${dateSafe}`;
 
-      if (!classFolderCache[classSafe]) {
-        classFolderCache[classSafe] = zip.folder(classSafe);
+      if (!classFolderCache[classFolderName]) {
+        classFolderCache[classFolderName] = zip.folder(classFolderName);
       }
       if (!leafFolders[leafKey]) {
-        leafFolders[leafKey] = classFolderCache[classSafe].folder(dateSafe);
+        leafFolders[leafKey] = classFolderCache[classFolderName].folder(dateSafe);
         perFolderPools[leafKey] = {};
       }
 
