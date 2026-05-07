@@ -38,7 +38,7 @@ const { buildLessonReportText, copyPasteTextPromise, shareLessonRecordViaSystem,
   useShare();
 
 const feedbackFormState = reactive({
-  subject: 'C++',
+  subject: '',
   classSchedule: '',
   lessonDate: '',
   teacher: '',

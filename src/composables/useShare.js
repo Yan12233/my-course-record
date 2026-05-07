@@ -17,20 +17,14 @@ export function useShare() {
     return s;
   }
 
-  function isDefaultCppCourseName(courseText) {
-    const s = String(courseText || '').trim().toLowerCase();
-    if (!s) return false;
-    return s === 'c++' || s === 'c＋＋' || s === 'cpp';
-  }
-
   function buildLessonReportText(courseRaw, lessonScheduleRaw) {
     const course = String(courseRaw || '').trim();
     const sch =
       lessonScheduleRaw && typeof lessonScheduleRaw === 'string' ? lessonScheduleRaw.trim() : '';
     if (!sch) return course || '未填班级';
-    // 常规 C++ 班默认只报班级；零售课再补“时间段 + 课程名”。
-    if (!course || isDefaultCppCourseName(course)) return sch;
-    return `${sch} ${course}`.trim();
+    // 有课程名则放在班级名前面；未填课程名则仅保留班级名。
+    if (!course) return sch;
+    return `${course} ${sch}`.trim();
   }
 
   function fallbackCopy(text) {

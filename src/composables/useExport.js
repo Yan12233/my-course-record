@@ -296,7 +296,6 @@ export function useExport() {
     const classFolderCache = {};
     const leafFolders = {};
     const perFolderPools = {};
-    const classCourseNotes = {};
     let added = 0;
 
     for (let i = 0; i < withImage.length; i++) {
@@ -306,19 +305,16 @@ export function useExport() {
 
       const classSafe = safeTimeSlotSegmentName(rec.lessonSchedule);
       const dateSafe = safeLessonDateFolderName(rec);
-      const courseText = String(rec.course || '').trim() || '未填写课程';
 
       const leafKey = `${classSafe}/${dateSafe}`;
 
       if (!classFolderCache[classSafe]) {
         classFolderCache[classSafe] = zip.folder(classSafe);
-        classCourseNotes[classSafe] = {};
       }
       if (!leafFolders[leafKey]) {
         leafFolders[leafKey] = classFolderCache[classSafe].folder(dateSafe);
         perFolderPools[leafKey] = {};
       }
-      classCourseNotes[classSafe][courseText] = true;
 
       const fld = leafFolders[leafKey];
       const pool = perFolderPools[leafKey];
@@ -327,18 +323,6 @@ export function useExport() {
       fld.file(fname, parsed.base64, { base64: true });
       added++;
     }
-
-    Object.keys(classFolderCache).forEach((className) => {
-      const courseList = Object.keys(classCourseNotes[className] || {}).sort((a, b) =>
-        a.localeCompare(b, 'zh-Hans-CN')
-      );
-      const noteContent = [
-        `班级：${className}`,
-        '课程备注：',
-        ...(courseList.length > 0 ? courseList.map((c) => `- ${c}`) : ['- 未填写课程']),
-      ].join('\n');
-      classFolderCache[className].file('课程备注.txt', noteContent);
-    });
 
     if (added === 0) {
       throw new Error('该月图片数据无法解析，请重新保存记录后再试');
