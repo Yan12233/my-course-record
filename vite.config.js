@@ -25,14 +25,13 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ request, sameOrigin }) =>
-              sameOrigin &&
-              ['document', 'script', 'style', 'image', 'font'].includes(request.destination),
+              sameOrigin && ['image', 'font'].includes(request.destination),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'app-static-cache',
               expiration: {
                 maxEntries: 120,
-                maxAgeSeconds: 60 * 60 * 24 * 30
+                maxAgeSeconds: 60 * 60 * 24 * 14
               }
             }
           }
