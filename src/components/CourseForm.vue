@@ -19,13 +19,13 @@ const emit = defineEmits([
 <template>
   <section class="space-y-6">
     <section class="space-y-2">
-      <label for="courseInput" class="block text-sm font-medium text-slate-700">课程</label>
+      <label for="courseInput" class="block text-sm font-medium text-slate-700">课程名（零售课必填）</label>
       <input
         id="courseInput"
         name="course"
         type="text"
         list="courseSuggestions"
-        placeholder="选择或输入课程名称"
+        placeholder="常规课可保持 C++，零售课请填写具体课程名"
         autocomplete="off"
         class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         :value="props.course"
@@ -34,13 +34,11 @@ const emit = defineEmits([
       <datalist id="courseSuggestions">
         <option v-for="item in courseSuggestions" :key="item" :value="item" />
       </datalist>
-      <p class="text-xs text-slate-400">可从列表中选，或直接输入新课名后在下方保存。</p>
+      <p class="text-xs text-slate-400">常规 C++ 课一般无需修改；零售课请填写真实课程名。</p>
     </section>
 
     <section class="space-y-2">
-      <label for="lessonScheduleInput" class="block text-sm font-medium text-slate-700">
-        上课时间段
-      </label>
+      <label for="lessonScheduleInput" class="block text-sm font-medium text-slate-700">班级名称 / 零售课说明</label>
       <input
         id="lessonScheduleInput"
         type="text"
@@ -48,7 +46,7 @@ const emit = defineEmits([
         list="timeSlotSuggestions"
         inputmode="text"
         maxlength="120"
-        placeholder="在下拉中选常用时段，或直接输入新建"
+        placeholder="常规课：xx学校初一x班；零售课：上课时间段"
         autocomplete="off"
         class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         :value="props.lessonSchedule"
@@ -57,9 +55,7 @@ const emit = defineEmits([
       <datalist id="timeSlotSuggestions">
         <option v-for="item in timeSlotSuggestions" :key="item" :value="item" />
       </datalist>
-      <p class="text-xs text-slate-400">
-        请先填写<strong class="font-medium text-slate-600">课程</strong>，再在此<strong>选择或新建时间段</strong>。
-      </p>
+      <p class="text-xs text-slate-400">常规课仅填班级名；零售课请填时间段，并在上方补充课程名。</p>
     </section>
 
     <section class="space-y-2">

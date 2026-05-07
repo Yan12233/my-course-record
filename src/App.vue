@@ -38,7 +38,7 @@ const { buildLessonReportText, copyPasteTextPromise, shareLessonRecordViaSystem,
   useShare();
 
 const feedbackFormState = reactive({
-  subject: '',
+  subject: 'C++',
   classSchedule: '',
   lessonDate: '',
   teacher: '',
@@ -57,7 +57,7 @@ let previewObjectUrl = null;
 const datetimeDisplay = ref('');
 let clockTimer = null;
 
-const courseSuggestions = ref(['课程A', '课程B', '课程C']);
+const courseSuggestions = ref(['C++', 'Python', 'Scratch', '信息学基础']);
 const timeSlotSuggestions = ref([
   '下午2点-4点',
   '下午4点-6点',

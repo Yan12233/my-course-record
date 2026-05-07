@@ -17,11 +17,20 @@ export function useShare() {
     return s;
   }
 
+  function isDefaultCppCourseName(courseText) {
+    const s = String(courseText || '').trim().toLowerCase();
+    if (!s) return false;
+    return s === 'c++' || s === 'c＋＋' || s === 'cpp';
+  }
+
   function buildLessonReportText(courseRaw, lessonScheduleRaw) {
-    const course = String(courseRaw || '').trim() || '未填课程';
+    const course = String(courseRaw || '').trim();
     const sch =
       lessonScheduleRaw && typeof lessonScheduleRaw === 'string' ? lessonScheduleRaw.trim() : '';
-    return sch ? `${course}${sch}` : course;
+    if (!sch) return course || '未填班级';
+    // 常规 C++ 班默认只报班级；零售课再补“时间段 + 课程名”。
+    if (!course || isDefaultCppCourseName(course)) return sch;
+    return `${sch} ${course}`.trim();
   }
 
   function fallbackCopy(text) {
