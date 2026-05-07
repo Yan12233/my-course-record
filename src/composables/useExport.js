@@ -217,6 +217,15 @@ export function useExport() {
     return s;
   }
 
+  function getExportCoursePrefix(courseRaw) {
+    const raw = String(courseRaw == null ? '' : courseRaw).trim();
+    if (!raw) return '';
+    const normalized = raw.replace(/[()（）\s]/g, '');
+    if (!normalized) return '';
+    if (normalized === '未填写课程' || normalized === '未填课程') return '';
+    return safeFolderName(raw);
+  }
+
   function safeTimeSlotSegmentName(scheduleRaw) {
     let s = scheduleRaw && typeof scheduleRaw === 'string' ? scheduleRaw.trim() : '';
     if (!s) return '未填写时间段';
@@ -304,8 +313,7 @@ export function useExport() {
       if (!parsed) continue;
 
       const classSafe = safeTimeSlotSegmentName(rec.lessonSchedule);
-      const courseRaw = String(rec.course == null ? '' : rec.course).trim();
-      const coursePrefix = courseRaw ? safeFolderName(courseRaw) : '';
+      const coursePrefix = getExportCoursePrefix(rec.course);
       const classFolderName = coursePrefix ? `${coursePrefix}-${classSafe}` : classSafe;
       const dateSafe = safeLessonDateFolderName(rec);
 
