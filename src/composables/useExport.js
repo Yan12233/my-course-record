@@ -1,4 +1,12 @@
 import { useImageHandler } from './useImageHandler';
+import {
+  deriveLessonDateFromDatetimeStr,
+  getRecordIsoDate,
+  pad2,
+  recordBelongsToMonth,
+  recordBelongsToYear,
+} from '../utils/lessonDate';
+import { getRetailHeadCount } from '../utils/lessonFee';
 
 export function useExport() {
   const { parseDataUrlForZip } = useImageHandler();
@@ -234,16 +242,6 @@ export function useExport() {
     return s;
   }
 
-  function deriveLessonDateFromDatetimeStr(dtStr) {
-    const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(dtStr || '').trim());
-    return m ? m[1] : '';
-  }
-
-  function normalizeLessonDateIso(raw) {
-    const s = String(raw || '').trim();
-    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
-  }
-
   function safeLessonDateFolderName(rec) {
     let raw = rec && typeof rec.lessonDate === 'string' ? rec.lessonDate.trim() : '';
     if (!raw && rec && rec.datetime) {
@@ -261,21 +259,255 @@ export function useExport() {
     return safeLessonDateFolderName(rec);
   }
 
-  function recordBelongsToMonth(record, yearMonth) {
-    if (!record || !yearMonth) return false;
-    const ld =
-      record.lessonDate && typeof record.lessonDate === 'string' ? record.lessonDate.trim() : '';
-    const iso = normalizeLessonDateIso(ld);
-    if (iso) return iso.substring(0, 7) === yearMonth;
-    const dt = record.datetime;
-    if (typeof dt === 'string' && dt.length >= 7) return dt.substring(0, 7) === yearMonth;
-    if (typeof record.createdAt === 'number' && !Number.isNaN(record.createdAt)) {
-      const d = new Date(record.createdAt);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      return `${y}-${m}` === yearMonth;
+  function buildExportClassFolderName(rec) {
+    const classSafe = safeTimeSlotSegmentName(rec.lessonSchedule);
+    const coursePrefix = getExportCoursePrefix(rec.course);
+    const base = coursePrefix ? `${coursePrefix}-${classSafe}` : classSafe;
+    if (rec && rec.lessonType === 'retail') {
+      return `零售课/${base}`;
     }
-    return false;
+    return base;
+  }
+
+  function escapeCsvCell(v) {
+    const s = String(v == null ? '' : v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  function buildMonthExportSummaryCsv(records) {
+    const header = [
+      '上课日期',
+      '课程类型',
+      '课程名',
+      '班级或时间段',
+      '课时',
+      '人数',
+      '每人每课时(元)',
+      '课时费(元)',
+      '教师',
+      '反馈学生数',
+      '含图片',
+    ];
+    const lines = [header.map(escapeCsvCell).join(',')];
+    const list = Array.isArray(records) ? records : [];
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      if (!rec) continue;
+      const iso = getRecordIsoDate(rec) || safeLessonDateFolderName(rec);
+      const typeLabel = rec.lessonType === 'retail' ? '零售课' : '常规课';
+      const feedbackCount = Array.isArray(rec.students) ? rec.students.length : 0;
+      const headCount = rec.lessonType === 'retail' ? getRetailHeadCount(rec) : '';
+      const hasImage = typeof rec.imageBase64 === 'string' && rec.imageBase64.length > 0;
+      const row = [
+        iso,
+        typeLabel,
+        rec.course || '',
+        rec.lessonSchedule || '',
+        rec.classHours != null ? rec.classHours : '',
+        headCount,
+        rec.feeRate != null ? rec.feeRate : '',
+        rec.classFee != null ? rec.classFee : '',
+        rec.teacher || '',
+        feedbackCount,
+        hasImage ? '是' : '否',
+      ];
+      lines.push(row.map(escapeCsvCell).join(','));
+    }
+    return `\uFEFF${lines.join('\r\n')}`;
+  }
+
+  function sortRecordsByLessonDate(records) {
+    return (Array.isArray(records) ? records : []).slice().sort((a, b) => {
+      const da = getRecordIsoDate(a) || '';
+      const db = getRecordIsoDate(b) || '';
+      return da.localeCompare(db) || (a.createdAt || 0) - (b.createdAt || 0);
+    });
+  }
+
+  function aggregateFeeStats(records) {
+    const stats = {
+      count: 0,
+      totalHours: 0,
+      totalFee: 0,
+      regularHours: 0,
+      regularFee: 0,
+      retailHours: 0,
+      retailFee: 0,
+    };
+    const list = Array.isArray(records) ? records : [];
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      if (!rec) continue;
+      const hours = Number(rec.classHours) || 0;
+      const fee = Number(rec.classFee) || 0;
+      stats.count += 1;
+      stats.totalHours += hours;
+      stats.totalFee += fee;
+      if (rec.lessonType === 'retail') {
+        stats.retailHours += hours;
+        stats.retailFee += fee;
+      } else {
+        stats.regularHours += hours;
+        stats.regularFee += fee;
+      }
+    }
+    stats.totalHours = Math.round(stats.totalHours * 100) / 100;
+    stats.totalFee = Math.round(stats.totalFee * 100) / 100;
+    stats.regularHours = Math.round(stats.regularHours * 100) / 100;
+    stats.regularFee = Math.round(stats.regularFee * 100) / 100;
+    stats.retailHours = Math.round(stats.retailHours * 100) / 100;
+    stats.retailFee = Math.round(stats.retailFee * 100) / 100;
+    return stats;
+  }
+
+  async function saveExcelRows(fileName, sheetName, rows) {
+    const ExcelJS = await getExcelJS();
+    const saveAs = await getSaveAs();
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(sheetName, { views: [{ showGridLines: true }] });
+    const headerFill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE8EEF7' },
+    };
+    rows.forEach((row, idx) => {
+      const excelRow = worksheet.addRow(row);
+      if (idx === 0 || (row[0] && String(row[0]).includes('合计'))) {
+        excelRow.eachCell((cell) => {
+          cell.font = { bold: idx === 0 };
+          if (idx === 0) cell.fill = headerFill;
+        });
+      }
+    });
+    worksheet.columns.forEach((col) => {
+      col.width = 14;
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    saveAs(blob, fileName);
+    return fileName;
+  }
+
+  async function exportMonthFeeExcel(records, ym) {
+    if (!ym) throw new Error('请先选择月份');
+    const list = Array.isArray(records) ? records : [];
+    const inMonth = list.filter((r) => recordBelongsToMonth(r, ym));
+    if (inMonth.length === 0) throw new Error('该月份没有任何上课记录');
+
+    const sorted = sortRecordsByLessonDate(inMonth);
+    const rows = [
+      [`${ym} 课时费明细表`],
+      [],
+      [
+        '上课日期',
+        '课程类型',
+        '课程名',
+        '班级或时间段',
+        '课时',
+        '人数',
+        '单价(元)',
+        '课时费(元)',
+        '教师',
+      ],
+    ];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const rec = sorted[i];
+      const iso = getRecordIsoDate(rec) || safeLessonDateFolderName(rec);
+      const isRetail = rec.lessonType === 'retail';
+      rows.push([
+        iso,
+        isRetail ? '零售课' : '常规课',
+        rec.course || '',
+        rec.lessonSchedule || '',
+        rec.classHours != null ? rec.classHours : 0,
+        isRetail ? getRetailHeadCount(rec) : '',
+        rec.feeRate != null ? rec.feeRate : 0,
+        rec.classFee != null ? rec.classFee : 0,
+        rec.teacher || '',
+      ]);
+    }
+
+    const stats = aggregateFeeStats(inMonth);
+    rows.push([]);
+    rows.push([
+      '合计',
+      `${stats.count} 节课`,
+      '',
+      '',
+      stats.totalHours,
+      '',
+      '',
+      stats.totalFee,
+      '',
+    ]);
+    rows.push([
+      '其中常规课',
+      '',
+      '',
+      '',
+      stats.regularHours,
+      '',
+      '',
+      stats.regularFee,
+      '',
+    ]);
+    rows.push([
+      '其中零售课',
+      '',
+      '',
+      '',
+      stats.retailHours,
+      '',
+      '',
+      stats.retailFee,
+      '',
+    ]);
+
+    const fileName = `课时费明细_${ym}.xlsx`;
+    await saveExcelRows(fileName, '月明细', rows);
+    return fileName;
+  }
+
+  async function exportYearFeeExcel(records, year) {
+    const y = String(year || '').trim();
+    if (!/^\d{4}$/.test(y)) throw new Error('请填写有效年份，如 2026');
+
+    const list = Array.isArray(records) ? records : [];
+    const inYear = list.filter((r) => recordBelongsToYear(r, y));
+    if (inYear.length === 0) throw new Error(`${y} 年没有任何上课记录`);
+
+    const rows = [[`${y} 年课时费汇总表`], [], ['月份', '课次', '总课时', '常规课时费(元)', '零售课时费(元)', '合计课时费(元)']];
+
+    const yearStats = aggregateFeeStats(inYear);
+
+    for (let m = 1; m <= 12; m++) {
+      const ym = `${y}-${pad2(m)}`;
+      const inMonth = inYear.filter((r) => recordBelongsToMonth(r, ym));
+      if (!inMonth.length) {
+        rows.push([`${m}月`, 0, 0, 0, 0, 0]);
+        continue;
+      }
+      const st = aggregateFeeStats(inMonth);
+      rows.push([`${m}月`, st.count, st.totalHours, st.regularFee, st.retailFee, st.totalFee]);
+    }
+
+    rows.push([]);
+    rows.push([
+      '全年合计',
+      yearStats.count,
+      yearStats.totalHours,
+      yearStats.regularFee,
+      yearStats.retailFee,
+      yearStats.totalFee,
+    ]);
+
+    const fileName = `课时费汇总_${y}年.xlsx`;
+    await saveExcelRows(fileName, '年汇总', rows);
+    return fileName;
   }
 
   function uniquifyFileNameInFolder(pool, stem, ext) {
@@ -293,15 +525,25 @@ export function useExport() {
     if (!ym) throw new Error('请先选择要导出的月份');
     const list = Array.isArray(records) ? records : [];
     const inMonth = list.filter((r) => recordBelongsToMonth(r, ym));
+    if (inMonth.length === 0) {
+      throw new Error('该月份没有任何上课记录');
+    }
+
     const withImage = inMonth.filter((r) => typeof r.imageBase64 === 'string' && r.imageBase64.length > 0);
 
     if (withImage.length === 0) {
+      const retailInMonth = inMonth.filter((r) => r.lessonType === 'retail').length;
+      if (retailInMonth > 0) {
+        throw new Error('该月零售课记录缺少图片，请编辑补传照片后再导出');
+      }
       throw new Error('该月份没有可导出的图片记录（或未带图）');
     }
 
     const JSZip = await getJSZip();
     const saveAs = await getSaveAs();
     const zip = new JSZip();
+    zip.file(`上课记录汇总_${ym}.csv`, buildMonthExportSummaryCsv(inMonth));
+
     const classFolderCache = {};
     const leafFolders = {};
     const perFolderPools = {};
@@ -312,9 +554,7 @@ export function useExport() {
       const parsed = parseDataUrlForZip(rec.imageBase64);
       if (!parsed) continue;
 
-      const classSafe = safeTimeSlotSegmentName(rec.lessonSchedule);
-      const coursePrefix = getExportCoursePrefix(rec.course);
-      const classFolderName = coursePrefix ? `${coursePrefix}-${classSafe}` : classSafe;
+      const classFolderName = buildExportClassFolderName(rec);
       const dateSafe = safeLessonDateFolderName(rec);
 
       const leafKey = `${classFolderName}/${dateSafe}`;
@@ -339,6 +579,12 @@ export function useExport() {
       throw new Error('该月图片数据无法解析，请重新保存记录后再试');
     }
 
+    const retailWithImage = withImage.filter((r) => r.lessonType === 'retail').length;
+    const retailInMonth = inMonth.filter((r) => r.lessonType === 'retail').length;
+    if (retailInMonth > 0 && retailWithImage === 0) {
+      throw new Error('该月零售课记录均无法导出图片，请重新保存后再试');
+    }
+
     const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     const fileTitle = `上课记录导出_${ym}.zip`;
     saveAs(blob, fileTitle);
@@ -357,5 +603,7 @@ export function useExport() {
     recordBelongsToMonth,
     uniquifyFileNameInFolder,
     exportMonthZip,
+    exportMonthFeeExcel,
+    exportYearFeeExcel,
   };
 }

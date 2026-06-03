@@ -1,5 +1,8 @@
 <script setup>
-defineProps({
+import { computed } from 'vue';
+import { computeLessonFee, normalizeFeeNumber, normalizeHeadCount } from '../../utils/lessonFee';
+
+const props = defineProps({
   visible: { type: Boolean, default: false },
   record: { type: Object, default: null },
   editValues: {
@@ -8,6 +11,10 @@ defineProps({
       course: '',
       lessonSchedule: '',
       lessonDate: '',
+      lessonType: 'regular',
+      classHours: '',
+      feeRate: '',
+      headCount: '1',
     }),
   },
   imageUrl: { type: String, default: '' },
@@ -24,13 +31,50 @@ const emit = defineEmits([
   'update:course',
   'update:lessonSchedule',
   'update:lessonDate',
+  'update:lessonType',
+  'update:classHours',
+  'update:feeRate',
+  'update:headCount',
   'replace-image',
   'remove-image',
 ]);
 
+const headCountOptions = Array.from({ length: 30 }, (_, i) => i + 1);
+
+const headCountValue = computed(() => {
+  const n = normalizeHeadCount(props.editValues.headCount);
+  return n > 0 ? n : 1;
+});
+
+const computedTotal = computed(() =>
+  computeLessonFee({
+    lessonType: props.editValues.lessonType,
+    classHours: props.editValues.classHours,
+    feeRate: props.editValues.feeRate,
+    headCount: props.editValues.lessonType === 'retail' ? headCountValue.value : 0,
+  }),
+);
+
+const breakdownText = computed(() => {
+  const hours = normalizeFeeNumber(props.editValues.classHours);
+  const rate = normalizeFeeNumber(props.editValues.feeRate);
+  const total = computedTotal.value;
+  if (!hours || !rate || !total) return '';
+
+  if (props.editValues.lessonType === 'retail') {
+    return `${hours} 课时 × ${headCountValue.value} 人 × ¥${rate}/人·课时 = ¥${total}`;
+  }
+  return `${hours} 课时 × ¥${rate} = ¥${total}`;
+});
+
 function onReplaceImageChange(e) {
   const file = e.target?.files?.[0] || null;
   if (file) emit('replace-image', file);
+}
+
+function stepHeadCount(delta) {
+  const next = Math.max(1, Math.min(30, headCountValue.value + delta));
+  emit('update:headCount', String(next));
 }
 </script>
 
@@ -61,7 +105,7 @@ function onReplaceImageChange(e) {
           />
         </label>
         <label class="space-y-1">
-          <span class="text-xs text-slate-500">时间段</span>
+          <span class="text-xs text-slate-500">时间段 / 班级</span>
           <input
             type="text"
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
@@ -78,6 +122,96 @@ function onReplaceImageChange(e) {
             @input="emit('update:lessonDate', $event.target.value)"
           />
         </label>
+        <div class="space-y-1">
+          <span class="text-xs text-slate-500">课程类型</span>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              class="rounded-lg border-2 py-2 text-xs font-semibold"
+              :class="
+                editValues.lessonType === 'regular'
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-800'
+                  : 'border-slate-200 text-slate-600'
+              "
+              @click="emit('update:lessonType', 'regular')"
+            >
+              常规课
+            </button>
+            <button
+              type="button"
+              class="rounded-lg border-2 py-2 text-xs font-semibold"
+              :class="
+                editValues.lessonType === 'retail'
+                  ? 'border-amber-500 bg-amber-50 text-amber-900'
+                  : 'border-slate-200 text-slate-600'
+              "
+              @click="emit('update:lessonType', 'retail')"
+            >
+              零售课
+            </button>
+          </div>
+        </div>
+
+        <template v-if="editValues.lessonType === 'retail'">
+          <label class="space-y-1">
+            <span class="text-xs text-slate-500">课时</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              :value="editValues.classHours"
+              @input="emit('update:classHours', $event.target.value)"
+            />
+          </label>
+          <div class="space-y-1">
+            <span class="text-xs text-slate-500">上课人数</span>
+            <div class="flex items-center gap-2">
+              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="stepHeadCount(-1)">−</button>
+              <select
+                class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                :value="headCountValue"
+                @change="emit('update:headCount', $event.target.value)"
+              >
+                <option v-for="n in headCountOptions" :key="n" :value="n">{{ n }} 人</option>
+              </select>
+              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="stepHeadCount(1)">+</button>
+            </div>
+          </div>
+          <label class="space-y-1">
+            <span class="text-xs text-slate-500">每人每课时费用（元）</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              :value="editValues.feeRate"
+              @input="emit('update:feeRate', $event.target.value)"
+            />
+          </label>
+        </template>
+        <div v-else class="grid grid-cols-2 gap-2">
+          <label class="space-y-1">
+            <span class="text-xs text-slate-500">课时</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              :value="editValues.classHours"
+              @input="emit('update:classHours', $event.target.value)"
+            />
+          </label>
+          <label class="space-y-1">
+            <span class="text-xs text-slate-500">单价（元/课时）</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              :value="editValues.feeRate"
+              @input="emit('update:feeRate', $event.target.value)"
+            />
+          </label>
+        </div>
+        <p v-if="breakdownText" class="text-xs font-medium text-emerald-700">{{ breakdownText }}</p>
+
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-2 space-y-2">
           <img
             v-if="imageUrl"

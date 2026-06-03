@@ -10,6 +10,14 @@ defineProps({
     type: String,
     default: '',
   },
+  showBatch: {
+    type: Boolean,
+    default: true,
+  },
+  requirePhoto: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['pick-photo', 'pick-batch', 'open-batch-import']);
@@ -47,9 +55,14 @@ function openBatchPicker() {
     />
     <label
       for="photoInput"
-      class="flex w-full cursor-pointer justify-center rounded-2xl bg-indigo-600 px-6 py-5 text-lg font-semibold text-white shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-transform"
+      class="flex w-full cursor-pointer justify-center rounded-2xl px-6 py-5 text-lg font-semibold text-white shadow-lg active:scale-[0.98] transition-transform"
+      :class="
+        requirePhoto
+          ? 'bg-amber-600 shadow-amber-500/30'
+          : 'bg-indigo-600 shadow-indigo-500/30'
+      "
     >
-      拍照 / 传图
+      {{ requirePhoto ? '拍照 / 传图（零售课必填）' : '拍照 / 传图' }}
     </label>
     <input
       id="batchPhotoInput"
@@ -63,6 +76,7 @@ function openBatchPicker() {
       @change="onBatchChange"
     />
     <button
+      v-if="showBatch"
       type="button"
       class="w-full rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700 active:bg-indigo-100"
       @click="openBatchPicker"

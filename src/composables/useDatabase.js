@@ -1,5 +1,7 @@
 import localforage from 'localforage';
 import { useImageHandler } from './useImageHandler';
+import { deriveLessonDateFromDatetimeStr } from '../utils/lessonDate';
+import { computeLessonFee, normalizeHeadCount } from '../utils/lessonFee';
 
 const STORAGE_KEY_RECORDS = 'course_records_v1';
 const STORAGE_KEY_TIME_SLOT_SUGGESTIONS = 'time_slot_suggestions_v1';
@@ -30,9 +32,81 @@ export function useDatabase() {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
   }
 
-  function deriveLessonDateFromDatetimeStr(dtStr) {
-    const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(dtStr || '').trim());
-    return m ? m[1] : '';
+  function normalizeNonNegativeNumber(v) {
+    const n = parseFloat(v);
+    if (Number.isNaN(n) || n < 0) return 0;
+    return Math.round(n * 100) / 100;
+  }
+
+  function normalizeLessonType(raw) {
+    return raw === 'retail' ? 'retail' : 'regular';
+  }
+
+  function sanitizeRecord(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = raw.id ? String(raw.id) : generateRecordId();
+    const datetime = typeof raw.datetime === 'string' ? raw.datetime : '';
+    const course = String(raw.course || '').trim() || '（未填写课程）';
+    const lessonSchedule = String(raw.lessonSchedule || '').trim();
+    let lessonDate = String(raw.lessonDate || '').trim();
+    if (!lessonDate && datetime) {
+      lessonDate = deriveLessonDateFromDatetimeStr(datetime);
+    }
+    const students = [];
+    if (Array.isArray(raw.students)) {
+      for (let i = 0; i < raw.students.length; i++) {
+        const one = sanitizeStudent(raw.students[i]);
+        if (one) students.push(one);
+      }
+    }
+    const lessonType = normalizeLessonType(raw.lessonType);
+    let feeRate = normalizeNonNegativeNumber(raw.feeRate);
+    const classHours = normalizeNonNegativeNumber(raw.classHours);
+    let classFee = normalizeNonNegativeNumber(raw.classFee);
+    let headCount = normalizeHeadCount(raw.headCount);
+    if (lessonType === 'retail' && headCount === 0 && students.length > 0) {
+      headCount = students.length;
+    }
+
+    if (!feeRate && classFee > 0 && classHours > 0) {
+      if (lessonType === 'retail' && headCount > 0) {
+        feeRate = normalizeNonNegativeNumber(classFee / classHours / headCount);
+      } else {
+        feeRate = normalizeNonNegativeNumber(classFee / classHours);
+      }
+    }
+
+    classFee = computeLessonFee({
+      lessonType,
+      classHours,
+      feeRate,
+      headCount,
+    });
+
+    return {
+      id,
+      datetime,
+      course,
+      lessonSchedule,
+      lessonDate,
+      subject: String(raw.subject || raw.course || '').trim() || course,
+      classSchedule: String(raw.classSchedule || raw.lessonSchedule || '').trim(),
+      teacher: String(raw.teacher || '').trim(),
+      classTime: String(raw.classTime || '').trim(),
+      admin: String(raw.admin || '林玲').trim() || '林玲',
+      courseContent: String(raw.courseContent || '').trim(),
+      students,
+      lessonType,
+      classHours,
+      headCount: lessonType === 'retail' ? headCount : 0,
+      feeRate,
+      classFee,
+      advancedFeedbackEnabled: !!raw.advancedFeedbackEnabled,
+      imageBase64: typeof raw.imageBase64 === 'string' ? raw.imageBase64 : null,
+      imageFileName: raw.imageFileName || null,
+      imageMimeType: raw.imageMimeType || null,
+      createdAt: typeof raw.createdAt === 'number' && !Number.isNaN(raw.createdAt) ? raw.createdAt : Date.now(),
+    };
   }
 
   function normalizeNonNegativeInt(v) {
@@ -77,6 +151,29 @@ export function useDatabase() {
       lessonDateStored = deriveLessonDateFromDatetimeStr(datetime);
     }
 
+    const fd = feedbackData && typeof feedbackData === 'object' ? feedbackData : {};
+    const sanitizedStudents = [];
+    if (Array.isArray(fd.students)) {
+      for (let i = 0; i < fd.students.length; i++) {
+        const one = sanitizeStudent(fd.students[i]);
+        if (one) sanitizedStudents.push(one);
+      }
+    }
+
+    const lessonType = normalizeLessonType(fd.lessonType);
+    const classHours = normalizeNonNegativeNumber(fd.classHours);
+    const feeRate = normalizeNonNegativeNumber(fd.feeRate);
+    let headCount = normalizeHeadCount(fd.headCount);
+    if (lessonType === 'retail' && headCount === 0) {
+      headCount = sanitizedStudents.length > 0 ? sanitizedStudents.length : 1;
+    }
+    const classFee = computeLessonFee({
+      lessonType,
+      classHours,
+      feeRate,
+      headCount,
+    });
+
     const record = {
       id: generateRecordId(),
       datetime,
@@ -86,17 +183,20 @@ export function useDatabase() {
           ? lessonSchedule.trim()
           : '',
       lessonDate: lessonDateStored || '',
-      subject: feedbackData && typeof feedbackData.subject === 'string' ? feedbackData.subject.trim() : (course || ''),
+      subject: typeof fd.subject === 'string' ? fd.subject.trim() : (course || ''),
       classSchedule:
-        feedbackData && typeof feedbackData.classSchedule === 'string'
-          ? feedbackData.classSchedule.trim()
-          : (lessonSchedule || ''),
-      teacher: feedbackData && typeof feedbackData.teacher === 'string' ? feedbackData.teacher.trim() : '',
-      classTime: feedbackData && typeof feedbackData.classTime === 'string' ? feedbackData.classTime.trim() : '',
-      admin: feedbackData && typeof feedbackData.admin === 'string' ? feedbackData.admin.trim() : '林玲',
-      courseContent:
-        feedbackData && typeof feedbackData.courseContent === 'string' ? feedbackData.courseContent.trim() : '',
-      students: feedbackData && Array.isArray(feedbackData.students) ? feedbackData.students.slice() : [],
+        typeof fd.classSchedule === 'string' ? fd.classSchedule.trim() : (lessonSchedule || ''),
+      teacher: typeof fd.teacher === 'string' ? fd.teacher.trim() : '',
+      classTime: typeof fd.classTime === 'string' ? fd.classTime.trim() : '',
+      admin: typeof fd.admin === 'string' ? fd.admin.trim() : '林玲',
+      courseContent: typeof fd.courseContent === 'string' ? fd.courseContent.trim() : '',
+      students: sanitizedStudents,
+      lessonType,
+      classHours,
+      headCount: lessonType === 'retail' ? headCount : 0,
+      feeRate,
+      classFee,
+      advancedFeedbackEnabled: !!fd.advancedFeedbackEnabled,
       imageBase64: null,
       imageFileName: null,
       imageMimeType: null,
@@ -126,12 +226,26 @@ export function useDatabase() {
 
   function getAllRecords() {
     ensureConfigured();
-    return localforage.getItem(STORAGE_KEY_RECORDS).then((arr) => (Array.isArray(arr) ? arr : []));
+    return localforage.getItem(STORAGE_KEY_RECORDS).then((arr) => {
+      const raw = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < raw.length; i++) {
+        const one = sanitizeRecord(raw[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
   }
 
   function setAllRecords(list) {
     ensureConfigured();
-    return localforage.setItem(STORAGE_KEY_RECORDS, Array.isArray(list) ? list : []);
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeRecord(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_RECORDS, safe);
   }
 
   function deleteRecordById(id) {
@@ -147,7 +261,8 @@ export function useDatabase() {
       const next = list.map((r) => {
         if (!r || r.id !== id) return r;
         changed = true;
-        return updater(r);
+        const updated = updater(r);
+        return sanitizeRecord(updated) || r;
       });
       if (!changed) throw new Error('记录不存在，可能已被删除');
       return setAllRecords(next).then(() => next);
@@ -273,7 +388,9 @@ export function useDatabase() {
     ensureConfigured,
     generateRecordId,
     deriveLessonDateFromDatetimeStr,
+    sanitizeRecord,
     sanitizeStudent,
+    normalizeLessonType,
     persistLessonRecord,
     getAllRecords,
     setAllRecords,

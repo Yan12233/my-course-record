@@ -1,12 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import HeaderSection from './components/HeaderSection.vue';
-import PhotoUploader from './components/PhotoUploader.vue';
-import CourseForm from './components/CourseForm.vue';
-import FeedbackForm from './components/FeedbackForm.vue';
-import StudentManager from './components/StudentManager.vue';
-import ActionButtons from './components/ActionButtons.vue';
-import RecordsLibrary from './components/RecordsLibrary.vue';
+import CalendarMonthView from './components/CalendarMonthView.vue';
+import DayLessonsView from './components/DayLessonsView.vue';
+import LessonEditorView from './components/LessonEditorView.vue';
+import SettingsSheet from './components/SettingsSheet.vue';
 import SaveSuccessModal from './components/Modals/SaveSuccessModal.vue';
 import TimetableModal from './components/Modals/TimetableModal.vue';
 import BatchImportModal from './components/Modals/BatchImportModal.vue';
@@ -15,6 +12,9 @@ import { useDatabase } from './composables/useDatabase';
 import { useImageHandler } from './composables/useImageHandler';
 import { useExport } from './composables/useExport';
 import { useShare } from './composables/useShare';
+import { buildRecordsByDateMap, sumRecords } from './composables/useLessonSummary';
+import { formatIsoLocalDate, formatYearMonth, recordBelongsToDate } from './utils/lessonDate';
+import { computeLessonFee, getRetailHeadCount, normalizeHeadCount } from './utils/lessonFee';
 
 const {
   ensureConfigured,
@@ -25,17 +25,28 @@ const {
   deleteRecordById,
   updateRecordById,
   getTimetableList,
+  setTimetableList,
   getTimeSlotSuggestions,
   rememberNewTimeSlotSuggestion,
   getCommonStudentNames,
   setCommonStudentNames,
   getFeedbackDraft,
   setFeedbackDraft,
+  TIMETABLE_WEEKDAYS,
+  generateRecordId,
+  sanitizeTimetableItem,
 } = useDatabase();
 const { compressImageFileForStorage, readFileAsDataURL } = useImageHandler();
-const { exportFeedbackExcel, exportMonthZip } = useExport();
+const { exportFeedbackExcel, exportMonthZip, exportMonthFeeExcel, exportYearFeeExcel } = useExport();
 const { buildLessonReportText, copyPasteTextPromise, shareLessonRecordViaSystem, getRuntimeInteractionHint } =
   useShare();
+
+const appView = ref('calendar');
+const selectedMonth = ref(formatYearMonth(new Date()));
+const selectedDate = ref('');
+const editingRecordId = ref(null);
+const advancedFeedbackExpanded = ref(false);
+const showSettings = ref(false);
 
 const feedbackFormState = reactive({
   subject: 'C++',
@@ -45,6 +56,10 @@ const feedbackFormState = reactive({
   classTime: '',
   admin: '林玲',
   courseContent: '',
+  lessonType: 'regular',
+  classHours: '',
+  feeRate: '',
+  headCount: '1',
 });
 const studentsDraft = ref([]);
 const newStudentName = ref('');
@@ -70,12 +85,17 @@ const timeSlotSuggestions = ref([
 const records = ref([]);
 const filterText = ref('');
 const exportMonth = ref('');
+const exportFeeYear = ref(String(new Date().getFullYear()));
 const exportingZip = ref(false);
+const exportingFeeMonth = ref(false);
+const exportingFeeYear = ref(false);
 const saveInFlight = ref(false);
 
 const showTimetable = ref(false);
 const showBatchImport = ref(false);
 const timetableItems = ref([]);
+const timetableForm = reactive({ weekday: '周一', slot: '', course: '' });
+const timetableEditingId = ref(null);
 
 const showRecordDetail = ref(false);
 const currentRecord = ref(null);
@@ -83,6 +103,10 @@ const detailEditValues = reactive({
   course: '',
   lessonSchedule: '',
   lessonDate: '',
+  lessonType: 'regular',
+  classHours: '',
+  feeRate: '',
+  headCount: '1',
 });
 const currentDetailImageFile = ref(null);
 const detailImageClearRequested = ref(false);
@@ -94,16 +118,22 @@ const saveSuccessImage = ref('');
 const saveSuccessHint = ref('');
 const saveSuccessEnvHint = ref('');
 
-const smartPrefillVisible = ref(false);
-let smartPrefillTimer = null;
-
 const restoreInputRef = ref(null);
-const hiddenDatePickerRef = ref(null);
 
 const toastMessage = ref('');
 const toastVisible = ref(false);
 let toastTimer = null;
 let draftSaveTimer = null;
+
+const todayIso = computed(() => formatIsoLocalDate(new Date()));
+const recordsByDate = computed(() => buildRecordsByDateMap(records.value, selectedMonth.value));
+const monthSummary = computed(() => sumRecords(records.value, { yearMonth: selectedMonth.value }));
+const dayRecords = computed(() => {
+  const iso = selectedDate.value;
+  if (!iso) return [];
+  return records.value.filter((r) => recordBelongsToDate(r, iso));
+});
+const daySummary = computed(() => sumRecords(records.value, { isoDate: selectedDate.value }));
 
 const filteredRecords = computed(() => {
   const kw = String(filterText.value || '').trim().toLowerCase();
@@ -113,6 +143,8 @@ const filteredRecords = computed(() => {
     return text.includes(kw);
   });
 });
+
+const timetableEditing = computed(() => !!timetableEditingId.value);
 
 function showToast(msg) {
   toastMessage.value = msg;
@@ -126,11 +158,6 @@ function showToast(msg) {
 
 function pad2(n) {
   return String(n).padStart(2, '0');
-}
-
-function formatIsoLocalDate(d) {
-  const x = d instanceof Date ? d : new Date();
-  return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
 }
 
 function formatNow() {
@@ -150,6 +177,12 @@ function normalizeNonNegativeInt(v) {
   const n = parseInt(v, 10);
   if (Number.isNaN(n) || n < 0) return 0;
   return n;
+}
+
+function parseMetricNumber(v) {
+  const n = parseFloat(String(v ?? '').trim());
+  if (Number.isNaN(n) || n < 0) return 0;
+  return Math.round(n * 100) / 100;
 }
 
 function createStudentDraft(name) {
@@ -180,6 +213,18 @@ function getFeedbackFormData() {
   const classTimeRaw = String(feedbackFormState.classTime || '').trim();
   const admin = String(feedbackFormState.admin || '林玲').trim() || '林玲';
   const courseContent = String(feedbackFormState.courseContent || '').trim();
+  const lessonType = feedbackFormState.lessonType === 'retail' ? 'retail' : 'regular';
+  const classHours = parseMetricNumber(feedbackFormState.classHours);
+  const feeRate = parseMetricNumber(feedbackFormState.feeRate);
+  const students = getStudentsForSave();
+  const headCount =
+    lessonType === 'retail' ? Math.max(1, normalizeHeadCount(feedbackFormState.headCount)) : 0;
+  const classFee = computeLessonFee({
+    lessonType,
+    classHours,
+    feeRate,
+    headCount,
+  });
   return {
     subject,
     classSchedule,
@@ -187,8 +232,30 @@ function getFeedbackFormData() {
     classTime: classTimeRaw || (lessonDateText ? `${lessonDateText} ${classSchedule}`.trim() : ''),
     admin,
     courseContent,
-    students: getStudentsForSave(),
+    students,
+    lessonType,
+    classHours,
+    headCount,
+    feeRate,
+    classFee,
+    advancedFeedbackEnabled: advancedFeedbackExpanded.value,
   };
+}
+
+function hasCurrentLessonImage() {
+  if (pickedFile.value) return true;
+  const url = String(previewUrl.value || '').trim();
+  return url.length > 0 && (url.startsWith('data:') || url.startsWith('blob:'));
+}
+
+function validateBeforeSave() {
+  if (feedbackFormState.lessonType !== 'retail') return null;
+  const fd = getFeedbackFormData();
+  if (!hasCurrentLessonImage()) return '零售课请先拍照或上传课堂图片';
+  if (!fd.teacher) return '零售课请填写教师姓名';
+  if (!fd.courseContent) return '零售课请填写今日授课内容';
+  if (!fd.students.length) return '零售课请至少添加一名学生';
+  return null;
 }
 
 function addStudent() {
@@ -260,81 +327,95 @@ function onPickPhoto(file) {
   }
 }
 
-function onPickBatch(files) {
-  showToast(`已选择 ${files.length} 张图片，批量补录逻辑将在下一阶段接入`);
+function resetLessonForm(isoDate) {
+  feedbackFormState.subject = 'C++';
+  feedbackFormState.classSchedule = '';
+  feedbackFormState.lessonDate = isoDate || selectedDate.value || formatIsoLocalDate(new Date());
+  feedbackFormState.teacher = '';
+  feedbackFormState.classTime = '';
+  feedbackFormState.admin = '林玲';
+  feedbackFormState.courseContent = '';
+  feedbackFormState.lessonType = 'regular';
+  feedbackFormState.classHours = '';
+  feedbackFormState.feeRate = '';
+  feedbackFormState.headCount = '1';
+  advancedFeedbackExpanded.value = false;
+  studentsDraft.value = [];
+  newStudentName.value = '';
+  clearCurrentPhotoSelection();
 }
 
-function openDatePicker() {
-  const el = hiddenDatePickerRef.value;
-  if (!el) return;
-  const cur = String(feedbackFormState.lessonDate || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cur)) {
-    el.value = cur;
+function loadRecordIntoForm(item) {
+  if (!item) return;
+  feedbackFormState.subject = String(item.subject || item.course || 'C++').trim() || 'C++';
+  feedbackFormState.classSchedule = String(item.classSchedule || item.lessonSchedule || '').trim();
+  feedbackFormState.lessonDate = String(item.lessonDate || selectedDate.value || '').trim();
+  feedbackFormState.teacher = String(item.teacher || '').trim();
+  feedbackFormState.classTime = String(item.classTime || '').trim();
+  feedbackFormState.admin = String(item.admin || '林玲').trim() || '林玲';
+  feedbackFormState.courseContent = String(item.courseContent || '').trim();
+  feedbackFormState.lessonType = item.lessonType === 'retail' ? 'retail' : 'regular';
+  feedbackFormState.classHours = item.classHours != null && item.classHours !== 0 ? String(item.classHours) : '';
+  feedbackFormState.feeRate = item.feeRate != null && item.feeRate !== 0 ? String(item.feeRate) : '';
+  const hc = item.headCount != null && item.headCount > 0 ? item.headCount : getRetailHeadCount(item);
+  feedbackFormState.headCount = item.lessonType === 'retail' ? String(Math.max(1, hc || 1)) : '1';
+  advancedFeedbackExpanded.value =
+    feedbackFormState.lessonType === 'retail' || !!item.advancedFeedbackEnabled;
+  const studs = [];
+  if (Array.isArray(item.students)) {
+    for (let i = 0; i < item.students.length; i++) {
+      const one = sanitizeStudent(item.students[i]);
+      if (one) studs.push(one);
+    }
   }
-  if (typeof el.showPicker === 'function') {
-    el.showPicker();
-  } else {
-    el.click();
+  studentsDraft.value = studs;
+  clearCurrentPhotoSelection();
+  if (item.imageBase64) {
+    previewUrl.value = item.imageBase64;
+    photoHint.value = '已载入原记录图片';
   }
 }
 
-function onDatePicked(e) {
-  const v = e.target?.value || '';
-  if (v) feedbackFormState.lessonDate = v;
+function onSelectDay(iso) {
+  selectedDate.value = iso;
+  appView.value = 'day';
 }
 
-function showSmartPrefillHint() {
-  smartPrefillVisible.value = true;
-  if (smartPrefillTimer) clearTimeout(smartPrefillTimer);
-  smartPrefillTimer = window.setTimeout(() => {
-    smartPrefillVisible.value = false;
-  }, 3000);
+function onBackToCalendar() {
+  appView.value = 'calendar';
 }
 
-function parseTimeRangeFromSlotText(slotText) {
-  const s = String(slotText || '').trim();
-  if (!s) return null;
-  const m = /(\d{1,2})[:：](\d{2})\s*[-~到至]\s*(\d{1,2})[:：](\d{2})/.exec(s);
-  if (!m) return null;
-  const sh = parseInt(m[1], 10);
-  const sm = parseInt(m[2], 10);
-  const eh = parseInt(m[3], 10);
-  const em = parseInt(m[4], 10);
-  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
-  const start = sh * 60 + sm;
-  const end = eh * 60 + em;
-  if (end <= start) return null;
-  return { start, end };
+function onBackToDay() {
+  appView.value = 'day';
 }
 
-async function applySmartPrefillByTimetable() {
-  const weekdayMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const now = new Date();
-  const weekday = weekdayMap[now.getDay()];
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const list = timetableItems.value.slice();
-  let best = null;
-  for (let i = 0; i < list.length; i++) {
-    const item = list[i];
-    if (!item || item.weekday !== weekday) continue;
-    const range = parseTimeRangeFromSlotText(item.slot);
-    if (!range) continue;
-    const winStart = range.start - 30;
-    const winEnd = range.end;
-    if (nowMin < winStart || nowMin > winEnd) continue;
-    const score = Math.abs(nowMin - range.start);
-    if (!best || score < best.score) best = { item, score };
-  }
-  if (!best) return false;
-  if (!String(feedbackFormState.subject || '').trim()) {
-    feedbackFormState.subject = best.item.course;
-  }
-  if (!String(feedbackFormState.classSchedule || '').trim()) {
-    feedbackFormState.classSchedule = best.item.slot;
-  }
-  showSmartPrefillHint();
-  return true;
+function startAddLesson() {
+  editingRecordId.value = null;
+  resetLessonForm(selectedDate.value);
+  appView.value = 'lesson';
 }
+
+function startEditLesson(item) {
+  editingRecordId.value = item?.id || null;
+  loadRecordIntoForm(item);
+  appView.value = 'lesson';
+}
+
+function toggleAdvancedFeedback() {
+  advancedFeedbackExpanded.value = !advancedFeedbackExpanded.value;
+}
+
+watch(
+  () => feedbackFormState.lessonType,
+  (t) => {
+    if (t === 'retail') {
+      advancedFeedbackExpanded.value = true;
+      if (normalizeHeadCount(feedbackFormState.headCount) < 1) {
+        feedbackFormState.headCount = '1';
+      }
+    }
+  },
+);
 
 async function refreshRecords() {
   records.value = await getAllRecords();
@@ -349,17 +430,79 @@ async function onSaveCopy() {
     showToast('正在保存中，请稍候…');
     return;
   }
+  const validationError = validateBeforeSave();
+  if (validationError) {
+    showToast(validationError);
+    return;
+  }
+
   saveInFlight.value = true;
   try {
     const when = datetimeDisplay.value || formatNow();
     const formData = getFeedbackFormData();
     const course = String(feedbackFormState.subject || '').trim() || '（未填写课程）';
     const lessonSchedule = String(feedbackFormState.classSchedule || '');
-    const lessonDateRaw = String(feedbackFormState.lessonDate || '');
+    const lessonDateRaw = String(feedbackFormState.lessonDate || selectedDate.value || '');
     const text = buildLessonReportText(course, lessonSchedule);
 
     await rememberNewTimeSlotSuggestion(lessonSchedule);
     const fileToStore = await compressImageFileForStorage(pickedFile.value);
+
+    if (editingRecordId.value) {
+      let newImage = null;
+      if (fileToStore) {
+        const dataUrl = await readFileAsDataURL(fileToStore);
+        newImage = {
+          imageBase64: typeof dataUrl === 'string' ? dataUrl : null,
+          imageFileName: fileToStore.name || null,
+          imageMimeType: fileToStore.type || 'image/jpeg',
+        };
+      } else if (previewUrl.value && previewUrl.value.startsWith('data:')) {
+        newImage = {
+          imageBase64: previewUrl.value,
+          imageFileName: null,
+          imageMimeType: 'image/jpeg',
+        };
+      }
+
+      await updateRecordById(editingRecordId.value, (oldRec) => {
+        const next = {
+          ...oldRec,
+          datetime: when,
+          course,
+          lessonSchedule,
+          lessonDate: lessonDateRaw,
+          subject: formData.subject,
+          classSchedule: formData.classSchedule,
+          teacher: formData.teacher,
+          classTime: formData.classTime,
+          admin: formData.admin,
+          courseContent: formData.courseContent,
+          students: formData.students,
+          lessonType: formData.lessonType,
+          classHours: formData.classHours,
+          headCount: formData.headCount,
+          feeRate: formData.feeRate,
+          classFee: formData.classFee,
+          advancedFeedbackEnabled: formData.advancedFeedbackEnabled,
+        };
+        if (newImage) {
+          next.imageBase64 = newImage.imageBase64;
+          next.imageFileName = newImage.imageFileName;
+          next.imageMimeType = newImage.imageMimeType;
+        }
+        return next;
+      });
+      await refreshRecords();
+      const copied = await copyPasteTextPromise(text);
+      if (!copied) showToast('已更新记录，但复制失败');
+      else showToast('记录已更新，汇报文字已复制');
+      editingRecordId.value = null;
+      appView.value = 'day';
+      resetLessonForm(selectedDate.value);
+      return;
+    }
+
     const saved = await persistLessonRecord(
       when,
       course,
@@ -379,6 +522,9 @@ async function onSaveCopy() {
       : '🎉 文字已自动复制！请打开微信，在对话中长按输入框粘贴发送。';
     saveSuccessEnvHint.value = getRuntimeInteractionHint();
     showSaveSuccess.value = true;
+    editingRecordId.value = null;
+    appView.value = 'day';
+    resetLessonForm(selectedDate.value);
   } catch (err) {
     console.error(err);
     showToast(`保存失败：${(err && err.message) || '未知错误'}`);
@@ -388,6 +534,10 @@ async function onSaveCopy() {
 }
 
 async function onExportExcel() {
+  if (feedbackFormState.lessonType !== 'retail' && !advancedFeedbackExpanded.value) {
+    showToast('请先选择零售课或展开高级填写后再导出反馈表');
+    return;
+  }
   try {
     const formData = getFeedbackFormData();
     await exportFeedbackExcel(formData);
@@ -407,6 +557,32 @@ async function onExportMonthZip() {
     showToast((err && err.message) || '导出失败');
   } finally {
     exportingZip.value = false;
+  }
+}
+
+async function onExportMonthFeeExcel() {
+  if (exportingFeeMonth.value) return;
+  exportingFeeMonth.value = true;
+  try {
+    const title = await exportMonthFeeExcel(records.value, exportMonth.value);
+    showToast(`已导出：${title}`);
+  } catch (err) {
+    showToast((err && err.message) || '导出失败');
+  } finally {
+    exportingFeeMonth.value = false;
+  }
+}
+
+async function onExportYearFeeExcel() {
+  if (exportingFeeYear.value) return;
+  exportingFeeYear.value = true;
+  try {
+    const title = await exportYearFeeExcel(records.value, exportFeeYear.value);
+    showToast(`已导出：${title}`);
+  } catch (err) {
+    showToast((err && err.message) || '导出失败');
+  } finally {
+    exportingFeeYear.value = false;
   }
 }
 
@@ -449,8 +625,16 @@ function openRecord(item) {
   detailEditValues.course = String(item?.course || '').trim() || '（未填写课程）';
   detailEditValues.lessonSchedule = String(item?.lessonSchedule || '').trim();
   detailEditValues.lessonDate = String(item?.lessonDate || '').trim();
+  detailEditValues.lessonType = item?.lessonType === 'retail' ? 'retail' : 'regular';
+  detailEditValues.classHours =
+    item?.classHours != null && item.classHours !== 0 ? String(item.classHours) : '';
+  detailEditValues.feeRate = item?.feeRate != null && item.feeRate !== 0 ? String(item.feeRate) : '';
+  const dhc = item?.headCount > 0 ? item.headCount : getRetailHeadCount(item);
+  detailEditValues.headCount =
+    item?.lessonType === 'retail' ? String(Math.max(1, dhc || 1)) : '1';
   resetDetailTempImageSelection();
   showRecordDetail.value = true;
+  showSettings.value = false;
 }
 
 const detailImageUrl = computed(() => {
@@ -555,6 +739,16 @@ async function onCopyRecordText() {
 
 async function onSaveRecordDetail() {
   if (!currentRecord.value || !currentRecord.value.id) return;
+  if (detailEditValues.lessonType === 'retail') {
+    const hasImg =
+      !!currentDetailImageFile.value ||
+      (!detailImageClearRequested.value &&
+        !!(currentRecord.value.imageBase64 && currentRecord.value.imageBase64.length));
+    if (!hasImg) {
+      showToast('零售课记录必须保留课堂图片');
+      return;
+    }
+  }
   try {
     let newImage = null;
     if (currentDetailImageFile.value) {
@@ -571,20 +765,37 @@ async function onSaveRecordDetail() {
 
     const nextList = await updateRecordById(currentRecord.value.id, (oldRec) => {
       const clearImg = !!detailImageClearRequested.value && !newImage;
+      const lessonType = detailEditValues.lessonType === 'retail' ? 'retail' : 'regular';
+      const classHours = parseMetricNumber(detailEditValues.classHours);
+      const feeRate = parseMetricNumber(detailEditValues.feeRate);
+      const headCount =
+        lessonType === 'retail' ? Math.max(1, normalizeHeadCount(detailEditValues.headCount)) : 0;
+      const classFee = computeLessonFee({ lessonType, classHours, feeRate, headCount });
       return {
         ...oldRec,
         course: String(detailEditValues.course || '').trim() || '（未填写课程）',
         lessonSchedule: String(detailEditValues.lessonSchedule || '').trim(),
         lessonDate: String(detailEditValues.lessonDate || '').trim(),
+        lessonType,
+        classHours,
+        headCount,
+        feeRate,
+        classFee,
         imageBase64: clearImg
           ? null
-          : (newImage ? newImage.imageBase64 : (oldRec.imageBase64 || null)),
+          : newImage
+            ? newImage.imageBase64
+            : oldRec.imageBase64 || null,
         imageFileName: clearImg
           ? null
-          : (newImage ? newImage.imageFileName : (oldRec.imageFileName || null)),
+          : newImage
+            ? newImage.imageFileName
+            : oldRec.imageFileName || null,
         imageMimeType: clearImg
           ? null
-          : (newImage ? newImage.imageMimeType : (oldRec.imageMimeType || null)),
+          : newImage
+            ? newImage.imageMimeType
+            : oldRec.imageMimeType || null,
       };
     });
 
@@ -594,6 +805,14 @@ async function onSaveRecordDetail() {
       detailEditValues.course = String(updated.course || '').trim() || '（未填写课程）';
       detailEditValues.lessonSchedule = String(updated.lessonSchedule || '').trim();
       detailEditValues.lessonDate = String(updated.lessonDate || '').trim();
+      detailEditValues.lessonType = updated.lessonType === 'retail' ? 'retail' : 'regular';
+      detailEditValues.classHours =
+        updated.classHours != null && updated.classHours !== 0 ? String(updated.classHours) : '';
+      detailEditValues.feeRate =
+        updated.feeRate != null && updated.feeRate !== 0 ? String(updated.feeRate) : '';
+      const uhc = updated.headCount > 0 ? updated.headCount : getRetailHeadCount(updated);
+      detailEditValues.headCount =
+        updated.lessonType === 'retail' ? String(Math.max(1, uhc || 1)) : '1';
     }
     resetDetailTempImageSelection();
     await refreshRecords();
@@ -656,19 +875,72 @@ async function onRestoreFileChange(e) {
   }
 }
 
+function resetTimetableForm() {
+  timetableForm.weekday = '周一';
+  timetableForm.slot = '';
+  timetableForm.course = '';
+  timetableEditingId.value = null;
+}
+
+function onTimetableBeginEdit(item) {
+  if (!item) return;
+  timetableEditingId.value = item.id;
+  timetableForm.weekday = item.weekday;
+  timetableForm.slot = item.slot;
+  timetableForm.course = item.course;
+}
+
+async function onTimetableSubmit() {
+  const one = sanitizeTimetableItem({
+    id: timetableEditingId.value || generateRecordId(),
+    weekday: timetableForm.weekday,
+    slot: timetableForm.slot,
+    course: timetableForm.course,
+    updatedAt: Date.now(),
+  });
+  if (!one) {
+    showToast('请填写完整的星期、时间段和课程名');
+    return;
+  }
+  const wasEdit = !!timetableEditingId.value;
+  let list = timetableItems.value.slice();
+  if (wasEdit) {
+    list = list.map((it) => (it.id === timetableEditingId.value ? one : it));
+  } else {
+    list.push(one);
+  }
+  timetableItems.value = await setTimetableList(list);
+  resetTimetableForm();
+  showToast(wasEdit ? '课表已更新' : '已添加课表项');
+}
+
+async function onTimetableDelete(id) {
+  const list = timetableItems.value.filter((it) => it.id !== id);
+  timetableItems.value = await setTimetableList(list);
+  if (timetableEditingId.value === id) resetTimetableForm();
+  showToast('已删除课表项');
+}
+
+function onPickBatch() {
+  showToast('批量补录功能开发中，敬请期待');
+}
+
 watch(
   () => ({
     form: { ...feedbackFormState },
     students: studentsDraft.value,
+    advanced: advancedFeedbackExpanded.value,
   }),
   () => {
+    if (appView.value !== 'lesson') return;
     if (draftSaveTimer) clearTimeout(draftSaveTimer);
     draftSaveTimer = window.setTimeout(() => {
       setFeedbackDraft({
-        version: 1,
+        version: 2,
         updatedAt: Date.now(),
         form: { ...feedbackFormState },
         students: getStudentsForSave(),
+        advancedFeedbackExpanded: advancedFeedbackExpanded.value,
       });
     }, 120);
   },
@@ -679,14 +951,17 @@ onMounted(async () => {
   ensureConfigured();
   tickClock();
   clockTimer = window.setInterval(tickClock, 1000);
-  feedbackFormState.lessonDate = formatIsoLocalDate(new Date());
-  exportMonth.value = `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`;
+  exportMonth.value = formatYearMonth(new Date());
+  exportFeeYear.value = String(new Date().getFullYear());
 
   const draft = getFeedbackDraft();
   if (draft && draft.form) {
     Object.assign(feedbackFormState, draft.form);
     if (Array.isArray(draft.students)) {
       studentsDraft.value = draft.students;
+    }
+    if (draft.advancedFeedbackExpanded) {
+      advancedFeedbackExpanded.value = true;
     }
   }
 
@@ -701,12 +976,10 @@ onMounted(async () => {
 
   await refreshRecords();
   await refreshTimetable();
-  await applySmartPrefillByTimetable();
 });
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer);
-  if (smartPrefillTimer) clearTimeout(smartPrefillTimer);
   if (toastTimer) clearTimeout(toastTimer);
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
@@ -716,80 +989,84 @@ onBeforeUnmount(() => {
 
 <template>
   <main
-    class="mx-auto max-w-md space-y-6 px-4 py-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)]"
+    class="mx-auto max-w-md px-4 py-6 pt-[max(1.5rem,env(safe-area-inset-top))]"
+    :class="appView === 'calendar' ? 'pb-24' : 'pb-[env(safe-area-inset-bottom)]'"
   >
-    <HeaderSection :smart-prefill-visible="smartPrefillVisible" @open-timetable="showTimetable = true" />
-
-    <PhotoUploader
-      :photo-hint="photoHint"
-      :preview-url="previewUrl"
-      @pick-photo="onPickPhoto"
-      @pick-batch="onPickBatch"
-      @open-batch-import="showBatchImport = true"
+    <CalendarMonthView
+      v-if="appView === 'calendar'"
+      v-model:year-month="selectedMonth"
+      :records-by-date="recordsByDate"
+      :today-iso="todayIso"
+      @select-day="onSelectDay"
+      @open-settings="showSettings = true"
     />
 
-    <CourseForm
+    <DayLessonsView
+      v-else-if="appView === 'day'"
+      :iso-date="selectedDate"
+      :records="dayRecords"
+      :day-summary="daySummary"
+      @back="onBackToCalendar"
+      @add-lesson="startAddLesson"
+      @edit-record="startEditLesson"
+      @open-record="openRecord"
+    />
+
+    <LessonEditorView
+      v-else-if="appView === 'lesson'"
+      :iso-date="selectedDate"
+      :photo-hint="photoHint"
+      :preview-url="previewUrl"
       :course="feedbackFormState.subject"
       :lesson-schedule="feedbackFormState.classSchedule"
       :lesson-date="feedbackFormState.lessonDate"
       :datetime-display="datetimeDisplay"
       :course-suggestions="courseSuggestions"
       :time-slot-suggestions="timeSlotSuggestions"
-      @update:course="feedbackFormState.subject = $event"
-      @update:lesson-schedule="feedbackFormState.classSchedule = $event"
-      @update:lesson-date="feedbackFormState.lessonDate = $event"
-      @open-date-picker="openDatePicker"
-    />
-
-    <FeedbackForm
+      :lesson-type="feedbackFormState.lessonType"
+      :class-hours="feedbackFormState.classHours"
+      :fee-rate="feedbackFormState.feeRate"
+      :head-count="feedbackFormState.headCount"
+      :advanced-expanded="advancedFeedbackExpanded"
       :teacher="feedbackFormState.teacher"
       :admin="feedbackFormState.admin"
       :class-time="feedbackFormState.classTime"
       :course-content="feedbackFormState.courseContent"
+      :students="studentsDraft"
+      :new-student-name="newStudentName"
+      :save-pending="saveInFlight"
+      :is-edit-mode="!!editingRecordId"
+      @back="onBackToDay"
+      @pick-photo="onPickPhoto"
+      @update:course="feedbackFormState.subject = $event"
+      @update:lesson-schedule="feedbackFormState.classSchedule = $event"
+      @update:lesson-date="feedbackFormState.lessonDate = $event"
+      @update:lesson-type="feedbackFormState.lessonType = $event"
+      @update:class-hours="feedbackFormState.classHours = $event"
+      @update:fee-rate="feedbackFormState.feeRate = $event"
+      @update:head-count="feedbackFormState.headCount = $event"
+      @toggle-advanced="toggleAdvancedFeedback"
       @update:teacher="feedbackFormState.teacher = $event"
       @update:admin="feedbackFormState.admin = $event"
       @update:class-time="feedbackFormState.classTime = $event"
       @update:course-content="feedbackFormState.courseContent = $event"
+      @update:new-student-name="newStudentName = $event"
+      @add-student="addStudent"
+      @remove-student="removeStudent"
+      @step-student="stepStudent"
+      @update-student-field="updateStudentField"
+      @save-common="onSaveCommonStudents"
+      @load-common="onLoadCommonStudents"
+      @save-copy="onSaveCopy"
+      @export-excel="onExportExcel"
     />
 
-    <section class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-      <StudentManager
-        :students="studentsDraft"
-        :new-student-name="newStudentName"
-        @update:new-student-name="newStudentName = $event"
-        @add-student="addStudent"
-        @remove-student="removeStudent"
-        @step-student="stepStudent"
-        @update-student-field="updateStudentField"
-        @save-common="onSaveCommonStudents"
-        @load-common="onLoadCommonStudents"
-      />
-    </section>
-
-    <ActionButtons :save-pending="saveInFlight" @save-copy="onSaveCopy" @export-excel="onExportExcel" />
-
-    <RecordsLibrary
-      :records="filteredRecords"
-      :filter-text="filterText"
-      :export-month="exportMonth"
-      :exporting-zip="exportingZip"
-      @update:filter-text="filterText = $event"
-      @update:export-month="exportMonth = $event"
-      @export-month-zip="onExportMonthZip"
-      @refresh="refreshRecords"
-      @backup="onBackupRecords"
-      @restore="onRestoreClick"
-      @open-record="openRecord"
-    />
-
-    <input ref="restoreInputRef" type="file" accept="application/json,.json" class="sr-only" @change="onRestoreFileChange" />
     <input
-      ref="hiddenDatePickerRef"
-      type="date"
+      ref="restoreInputRef"
+      type="file"
+      accept="application/json,.json"
       class="sr-only"
-      tabindex="-1"
-      aria-hidden="true"
-      @change="onDatePicked"
+      @change="onRestoreFileChange"
     />
 
     <SaveSuccessModal
@@ -803,8 +1080,55 @@ onBeforeUnmount(() => {
         clearCurrentPhotoSelection();
       "
     />
-    <TimetableModal :visible="showTimetable" :items="timetableItems" @close="showTimetable = false" />
+
+    <SettingsSheet
+      :visible="showSettings"
+      :records="filteredRecords"
+      :filter-text="filterText"
+      :export-month="exportMonth"
+      :export-fee-year="exportFeeYear"
+      :exporting-zip="exportingZip"
+      :exporting-fee-month="exportingFeeMonth"
+      :exporting-fee-year="exportingFeeYear"
+      @close="showSettings = false"
+      @open-timetable="
+        showSettings = false;
+        showTimetable = true;
+      "
+      @open-batch-import="
+        showSettings = false;
+        showBatchImport = true;
+      "
+      @update:filter-text="filterText = $event"
+      @update:export-month="exportMonth = $event"
+      @export-month-zip="onExportMonthZip"
+      @export-fee-month="onExportMonthFeeExcel"
+      @export-fee-year="onExportYearFeeExcel"
+      @update:export-fee-year="exportFeeYear = $event"
+      @refresh="refreshRecords"
+      @backup="onBackupRecords"
+      @restore="onRestoreClick"
+      @open-record="openRecord"
+    />
+
+    <TimetableModal
+      :visible="showTimetable"
+      :items="timetableItems"
+      :weekdays="TIMETABLE_WEEKDAYS"
+      :form-values="timetableForm"
+      :editing="timetableEditing"
+      @close="showTimetable = false"
+      @submit="onTimetableSubmit"
+      @cancel-edit="resetTimetableForm"
+      @delete="onTimetableDelete"
+      @begin-edit="onTimetableBeginEdit"
+      @update:weekday="timetableForm.weekday = $event"
+      @update:slot="timetableForm.slot = $event"
+      @update:course="timetableForm.course = $event"
+    />
+
     <BatchImportModal :visible="showBatchImport" :rows="[]" @close="showBatchImport = false" />
+
     <RecordDetailModal
       :visible="showRecordDetail"
       :record="currentRecord"
@@ -814,8 +1138,12 @@ onBeforeUnmount(() => {
       :remove-image-disabled="detailRemoveImageDisabled"
       @close="closeRecordDetailModal"
       @update:course="detailEditValues.course = $event"
-      @update:lessonSchedule="detailEditValues.lessonSchedule = $event"
-      @update:lessonDate="detailEditValues.lessonDate = $event"
+      @update:lesson-schedule="detailEditValues.lessonSchedule = $event"
+      @update:lesson-date="detailEditValues.lessonDate = $event"
+      @update:lesson-type="detailEditValues.lessonType = $event"
+      @update:class-hours="detailEditValues.classHours = $event"
+      @update:fee-rate="detailEditValues.feeRate = $event"
+      @update:head-count="detailEditValues.headCount = $event"
       @replace-image="onReplaceDetailImage"
       @remove-image="onRemoveDetailImage"
       @delete="onDeleteRecord"
@@ -826,9 +1154,24 @@ onBeforeUnmount(() => {
   </main>
 
   <div
+    v-if="appView === 'calendar'"
+    class="fixed left-0 right-0 z-40 mx-auto max-w-md border-t border-slate-200 bg-white/95 px-4 py-3 text-center text-sm text-slate-700 backdrop-blur"
+    style="bottom: max(0px, env(safe-area-inset-bottom))"
+  >
+    本月合计：
+    <span class="font-semibold text-indigo-700">{{ monthSummary.totalHours }}</span>
+    课时 ·
+    <span class="font-semibold text-emerald-700">¥{{ monthSummary.totalFee }}</span>
+    <span class="text-slate-400">（{{ monthSummary.count }} 节）</span>
+  </div>
+
+  <div
     class="pointer-events-none fixed left-1/2 z-[200] w-[min(92vw,22rem)] -translate-x-1/2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm leading-snug text-white shadow-xl shadow-slate-900/20 transition-opacity duration-200"
     style="bottom: max(1.25rem, env(safe-area-inset-bottom))"
-    :class="toastVisible ? 'opacity-100' : 'opacity-0 hidden'"
+    :class="[
+      toastVisible ? 'opacity-100' : 'opacity-0 hidden',
+      appView === 'calendar' ? '!bottom-20' : '',
+    ]"
   >
     {{ toastMessage }}
   </div>

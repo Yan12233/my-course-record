@@ -6,6 +6,8 @@ const props = defineProps({
   datetimeDisplay: { type: String, default: '' },
   courseSuggestions: { type: Array, default: () => [] },
   timeSlotSuggestions: { type: Array, default: () => [] },
+  lockLessonDate: { type: Boolean, default: false },
+  showDatetime: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -58,7 +60,7 @@ const emit = defineEmits([
       <p class="text-xs text-slate-400">常规课仅填班级名；零售课请填时间段，并在上方补充课程名。</p>
     </section>
 
-    <section class="space-y-2">
+    <section v-if="!lockLessonDate" class="space-y-2">
       <span class="block text-sm font-medium text-slate-700">上课日期</span>
       <div class="flex gap-2 items-stretch">
         <input
@@ -83,14 +85,17 @@ const emit = defineEmits([
         </button>
       </div>
     </section>
+    <p v-else-if="props.lessonDate" class="text-sm text-slate-600">
+      上课日期：<span class="font-medium text-slate-900">{{ props.lessonDate }}</span>
+    </p>
 
-    <section class="space-y-2">
-      <label for="datetimeDisplay" class="block text-sm font-medium text-slate-700">保存时刻（备忘）</label>
+    <section v-if="showDatetime && datetimeDisplay" class="space-y-2">
+      <label for="datetimeDisplay" class="block text-xs font-medium text-slate-500">保存时刻</label>
       <input
         id="datetimeDisplay"
         type="text"
         readonly
-        class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base tabular-nums text-slate-700"
+        class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm tabular-nums text-slate-600"
         :value="props.datetimeDisplay"
       />
     </section>
