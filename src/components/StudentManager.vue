@@ -18,6 +18,7 @@ const emit = defineEmits([
   'update-student-field',
   'save-common',
   'load-common',
+  'open-student',
 ]);
 </script>
 
@@ -68,7 +69,13 @@ const emit = defineEmits([
         class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2"
       >
         <div class="flex items-center justify-between gap-2">
-          <p class="text-sm font-semibold text-slate-900">{{ s.name || '未命名学生' }}</p>
+          <button
+            type="button"
+            class="text-sm font-semibold text-indigo-700 underline-offset-2 hover:underline active:text-indigo-900"
+            @click="emit('open-student', s.name)"
+          >
+            {{ s.name || '未命名学生' }}
+          </button>
           <button
             type="button"
             class="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-700 active:bg-rose-50"

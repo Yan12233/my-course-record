@@ -10,12 +10,17 @@ defineProps({
   exportingZip: { type: Boolean, default: false },
   exportingFeeMonth: { type: Boolean, default: false },
   exportingFeeYear: { type: Boolean, default: false },
+  pointsMonth: { type: String, default: '' },
+  pointsTeacherName: { type: String, default: '' },
+  exportingPoints: { type: Boolean, default: false },
+  nonTeachingItems: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits([
   'close',
   'open-timetable',
   'open-batch-import',
+  'open-course-manager',
   'refresh',
   'backup',
   'restore',
@@ -26,6 +31,13 @@ const emit = defineEmits([
   'export-fee-month',
   'export-fee-year',
   'open-record',
+  'update:pointsMonth',
+  'update:pointsTeacherName',
+  'export-points',
+  'open-points-config',
+  'add-non-teaching',
+  'remove-non-teaching',
+  'update-non-teaching',
 ]);
 </script>
 
@@ -65,6 +77,13 @@ const emit = defineEmits([
         >
           批量补录（开发中）
         </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-600 active:bg-slate-50"
+          @click="emit('open-course-manager')"
+        >
+          📚 管理课程分类
+        </button>
       </div>
 
       <RecordsLibrary
@@ -75,6 +94,10 @@ const emit = defineEmits([
         :exporting-zip="exportingZip"
         :exporting-fee-month="exportingFeeMonth"
         :exporting-fee-year="exportingFeeYear"
+        :points-month="pointsMonth"
+        :points-teacher-name="pointsTeacherName"
+        :exporting-points="exportingPoints"
+        :non-teaching-items="nonTeachingItems"
         @update:filter-text="emit('update:filterText', $event)"
         @update:export-month="emit('update:exportMonth', $event)"
         @update:export-fee-year="emit('update:exportFeeYear', $event)"
@@ -85,6 +108,13 @@ const emit = defineEmits([
         @backup="emit('backup')"
         @restore="emit('restore')"
         @open-record="emit('open-record')"
+        @update:points-month="emit('update:pointsMonth', $event)"
+        @update:points-teacher-name="emit('update:pointsTeacherName', $event)"
+        @export-points="emit('export-points')"
+        @open-points-config="emit('open-points-config')"
+        @add-non-teaching="emit('add-non-teaching')"
+        @remove-non-teaching="emit('remove-non-teaching', $event)"
+        @update-non-teaching="emit('update-non-teaching', $event)"
       />
     </div>
   </div>

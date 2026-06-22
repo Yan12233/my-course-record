@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from 'vue';
-import { computeLessonFee, normalizeFeeNumber, normalizeHeadCount } from '../utils/lessonFee';
+import { toRef } from 'vue';
+import { useLessonFeeDisplay } from '../composables/useLessonFeeDisplay';
 
 const props = defineProps({
   lessonType: { type: String, default: 'regular' },
@@ -11,42 +11,17 @@ const props = defineProps({
 
 const emit = defineEmits(['update:classHours', 'update:feeRate', 'update:headCount']);
 
-const headCountOptions = Array.from({ length: 30 }, (_, i) => i + 1);
+const lessonTypeRef = toRef(props, 'lessonType');
+const classHoursRef = toRef(props, 'classHours');
+const feeRateRef = toRef(props, 'feeRate');
+const headCountRef = toRef(props, 'headCount');
 
-const headCountValue = computed(() => {
-  const n = normalizeHeadCount(props.headCount);
-  return n > 0 ? n : 1;
-});
-
-const computedTotal = computed(() =>
-  computeLessonFee({
-    lessonType: props.lessonType,
-    classHours: props.classHours,
-    feeRate: props.feeRate,
-    headCount: props.lessonType === 'retail' ? headCountValue.value : 0,
-  }),
+const { headCountOptions, headCountValue, breakdownText, stepHeadCount } = useLessonFeeDisplay(
+  lessonTypeRef, classHoursRef, feeRateRef, headCountRef,
 );
-
-const breakdownText = computed(() => {
-  const hours = normalizeFeeNumber(props.classHours);
-  const rate = normalizeFeeNumber(props.feeRate);
-  const total = computedTotal.value;
-  if (!hours || !rate || !total) return '';
-
-  if (props.lessonType === 'retail') {
-    const count = headCountValue.value;
-    return `${hours} 课时 × ${count} 人 × ¥${rate}/人·课时 = ¥${total}`;
-  }
-  return `${hours} 课时 × ¥${rate} = ¥${total}`;
-});
 
 function onHeadCountChange(e) {
   emit('update:headCount', e.target.value);
-}
-
-function stepHeadCount(delta) {
-  const next = Math.max(1, Math.min(30, headCountValue.value + delta));
-  emit('update:headCount', String(next));
 }
 </script>
 
@@ -72,7 +47,7 @@ function stepHeadCount(delta) {
             type="button"
             class="h-11 w-11 shrink-0 rounded-xl border border-slate-300 bg-white text-lg font-semibold text-slate-700 active:bg-slate-50"
             aria-label="减少人数"
-            @click="stepHeadCount(-1)"
+            @click="emit('update:headCount', stepHeadCount(-1))"
           >
             −
           </button>
@@ -87,7 +62,7 @@ function stepHeadCount(delta) {
             type="button"
             class="h-11 w-11 shrink-0 rounded-xl border border-slate-300 bg-white text-lg font-semibold text-slate-700 active:bg-slate-50"
             aria-label="增加人数"
-            @click="stepHeadCount(1)"
+            @click="emit('update:headCount', stepHeadCount(1))"
           >
             +
           </button>

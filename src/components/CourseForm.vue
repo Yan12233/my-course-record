@@ -1,4 +1,6 @@
 <script setup>
+import { computed, ref, watch } from 'vue';
+
 const props = defineProps({
   course: { type: String, default: '' },
   lessonSchedule: { type: String, default: '' },
@@ -15,28 +17,69 @@ const emit = defineEmits([
   'update:lessonSchedule',
   'update:lessonDate',
   'open-date-picker',
+  'open-course-manager',
 ]);
+
+const useCustomCourse = ref(false);
+
+const courseOption = computed(() => {
+  const c = props.course;
+  if (!c || c === '（未填写课程）') return '';
+  return c;
+});
+
+function onCourseSelect(e) {
+  const val = e.target.value;
+  if (val === '__custom__') {
+    useCustomCourse.value = true;
+    return;
+  }
+  if (val === '__manage__') {
+    emit('open-course-manager');
+    e.target.value = props.course || '';
+    return;
+  }
+  useCustomCourse.value = false;
+  emit('update:course', val);
+}
+
+watch(() => props.course, (val) => {
+  if (val && !props.courseSuggestions.includes(val)) {
+    useCustomCourse.value = true;
+  }
+}, { immediate: true });
 </script>
 
 <template>
   <section class="space-y-6">
     <section class="space-y-2">
-      <label for="courseInput" class="block text-sm font-medium text-slate-700">课程名（默认 C++）</label>
-      <input
-        id="courseInput"
-        name="course"
-        type="text"
-        list="courseSuggestions"
-        placeholder="默认 C++，若是其他课程请手动修改"
-        autocomplete="off"
-        class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-        :value="props.course"
-        @input="emit('update:course', $event.target.value)"
-      />
-      <datalist id="courseSuggestions">
-        <option v-for="item in courseSuggestions" :key="item" :value="item" />
-      </datalist>
-      <p class="text-xs text-slate-400">一般无需改动；零售或非 C++ 课程时，请填写真实课程名。</p>
+      <label for="courseSelect" class="block text-sm font-medium text-slate-700">课程</label>
+      <div class="flex gap-2">
+        <select
+          id="courseSelect"
+          class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-3 text-base outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          :value="useCustomCourse ? '__custom__' : (courseSuggestions.includes(course) ? course : '')"
+          @change="onCourseSelect"
+        >
+          <option value="" disabled>选择课程…</option>
+          <option v-for="item in courseSuggestions" :key="item" :value="item">{{ item }}</option>
+          <option value="__custom__">✏️ 自定义课程…</option>
+          <option disabled>──────────</option>
+          <option value="__manage__">⚙️ 管理课程分类…</option>
+        </select>
+      </div>
+      <template v-if="useCustomCourse">
+        <input
+          type="text"
+          maxlength="100"
+          placeholder="输入自定义课程名"
+          autocomplete="off"
+          class="mt-1 w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-base outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          :value="course"
+          @input="emit('update:course', $event.target.value)"
+        />
+      </template>
+      <p class="text-xs text-slate-400">从已设置的课程中选择，如需新类别请选择「自定义」或到「更多 → 管理课程」中添加。</p>
     </section>
 
     <section class="space-y-2">

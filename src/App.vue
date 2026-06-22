@@ -8,6 +8,11 @@ import SaveSuccessModal from './components/Modals/SaveSuccessModal.vue';
 import TimetableModal from './components/Modals/TimetableModal.vue';
 import BatchImportModal from './components/Modals/BatchImportModal.vue';
 import RecordDetailModal from './components/Modals/RecordDetailModal.vue';
+import PointsConfigModal from './components/Modals/PointsConfigModal.vue';
+import DataDashboard from './components/DataDashboard.vue';
+import StudentDetailModal from './components/Modals/StudentDetailModal.vue';
+import TemplateManagerModal from './components/Modals/TemplateManagerModal.vue';
+import CourseManagerModal from './components/Modals/CourseManagerModal.vue';
 import { useDatabase } from './composables/useDatabase';
 import { useImageHandler } from './composables/useImageHandler';
 import { useExport } from './composables/useExport';
@@ -32,12 +37,20 @@ const {
   setCommonStudentNames,
   getFeedbackDraft,
   setFeedbackDraft,
+  getPointsCourseCategories,
+  setPointsCourseCategories,
+  getPointsTeacherName,
+  setPointsTeacherName,
+  getPointsSchoolNames,
+  setPointsSchoolNames,
   TIMETABLE_WEEKDAYS,
   generateRecordId,
   sanitizeTimetableItem,
+  getCourseList,
+  setCourseList,
 } = useDatabase();
 const { compressImageFileForStorage, readFileAsDataURL } = useImageHandler();
-const { exportFeedbackExcel, exportMonthZip, exportMonthFeeExcel, exportYearFeeExcel } = useExport();
+const { exportFeedbackExcel, exportMonthZip, exportMonthFeeExcel, exportYearFeeExcel, exportPointsTableExcel } = useExport();
 const { buildLessonReportText, copyPasteTextPromise, shareLessonRecordViaSystem, getRuntimeInteractionHint } =
   useShare();
 
@@ -72,7 +85,7 @@ let previewObjectUrl = null;
 const datetimeDisplay = ref('');
 let clockTimer = null;
 
-const courseSuggestions = ref(['C++', 'Python', 'Scratch', '信息学基础']);
+const courseSuggestions = ref([]);
 const timeSlotSuggestions = ref([
   '下午2点-4点',
   '下午4点-6点',
@@ -93,12 +106,32 @@ const saveInFlight = ref(false);
 
 const showTimetable = ref(false);
 const showBatchImport = ref(false);
+const showPointsConfig = ref(false);
+const pointsMonth = ref(formatYearMonth(new Date()));
+const pointsTeacherName = ref('');
+const exportingPoints = ref(false);
+const pointsCategoryMap = ref({});
+const pointsSchoolMap = ref({});
+const nonTeachingItems = ref([]);
 const timetableItems = ref([]);
 const timetableForm = reactive({ weekday: '周一', slot: '', course: '' });
 const timetableEditingId = ref(null);
 
 const showRecordDetail = ref(false);
 const currentRecord = ref(null);
+const showDeleteConfirm = ref(false);
+const deletingRecordId = ref(null);
+
+/* ───── 数据看板 ───── */
+
+/* ───── 学生详情 ───── */
+const showStudentDetail = ref(false);
+
+/* ───── 课程模板 ───── */
+const showTemplateManager = ref(false);
+const showCourseManager = ref(false);
+const lastSavedRecord = ref(null);
+const lastSavedText = ref('');
 const detailEditValues = reactive({
   course: '',
   lessonSchedule: '',
@@ -121,6 +154,7 @@ const saveSuccessEnvHint = ref('');
 const restoreInputRef = ref(null);
 
 const toastMessage = ref('');
+const toastType = ref('info');
 const toastVisible = ref(false);
 let toastTimer = null;
 let draftSaveTimer = null;
@@ -146,8 +180,9 @@ const filteredRecords = computed(() => {
 
 const timetableEditing = computed(() => !!timetableEditingId.value);
 
-function showToast(msg) {
+function showToast(msg, type) {
   toastMessage.value = msg;
+  toastType.value = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
   toastVisible.value = true;
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
@@ -494,9 +529,21 @@ async function onSaveCopy() {
         return next;
       });
       await refreshRecords();
-      const copied = await copyPasteTextPromise(text);
-      if (!copied) showToast('已更新记录，但复制失败');
-      else showToast('记录已更新，汇报文字已复制');
+
+      /* 编辑更新后也尝试分享 */
+      const shareRec = {
+        course,
+        lessonSchedule,
+        imageBase64: (newImage && newImage.imageBase64) || (previewUrl.value && previewUrl.value.startsWith('data:') ? previewUrl.value : ''),
+      };
+      const shareResult = await shareLessonRecordViaSystem(shareRec).catch(() => null);
+      if (shareResult && shareResult.ok) {
+        showToast('已更新并调起分享，请在微信选择群聊发送');
+      } else {
+        const copied = await copyPasteTextPromise(text);
+        if (!copied) showToast('已更新记录，但复制失败');
+        else showToast('记录已更新，汇报文字已复制');
+      }
       editingRecordId.value = null;
       appView.value = 'day';
       resetLessonForm(selectedDate.value);
@@ -512,18 +559,35 @@ async function onSaveCopy() {
       formData,
     );
     await refreshRecords();
-    const copied = await copyPasteTextPromise(text);
-    if (!copied) {
-      showToast('本地已保存，但复制失败，请手动复制');
+
+    /* ─── 保存后自动调起系统分享（图片+文字） ─── */
+    const shareRec = {
+      ...saved,
+      course,
+      lessonSchedule,
+      imageBase64: (saved && saved.imageBase64) || (previewUrl.value && previewUrl.value.startsWith('data:') ? previewUrl.value : ''),
+    };
+    lastSavedRecord.value = shareRec;
+    lastSavedText.value = text;
+
+    const shareResult = await shareLessonRecordViaSystem(shareRec).catch(() => null);
+
+    if (shareResult && shareResult.ok) {
+      showToast('已保存并调起分享，请在微信选择群聊发送');
+    } else {
+      /* 分享不可用 → 退回到复制文字 + 展示图片弹窗 */
+      const copied = await copyPasteTextPromise(text);
+      if (!copied) {
+        showToast('本地已保存，但复制失败，请手动复制');
+      }
+      saveSuccessImage.value = saved && saved.imageBase64 ? saved.imageBase64 : '';
+      saveSuccessHint.value = saved.imageBase64
+        ? '🎉 已保存！点击下方「分享到微信」可分享图片和文字'
+        : '🎉 已保存！点击下方「分享到微信」可分享文字';
+      saveSuccessEnvHint.value = getRuntimeInteractionHint();
+      showSaveSuccess.value = true;
     }
-    saveSuccessImage.value = saved && saved.imageBase64 ? saved.imageBase64 : '';
-    saveSuccessHint.value = saved.imageBase64
-      ? '🎉 文字已自动复制！请【长按下方图片】选择复制，然后打开微信粘贴发送。'
-      : '🎉 文字已自动复制！请打开微信，在对话中长按输入框粘贴发送。';
-    saveSuccessEnvHint.value = getRuntimeInteractionHint();
-    showSaveSuccess.value = true;
-    editingRecordId.value = null;
-    appView.value = 'day';
+
     resetLessonForm(selectedDate.value);
   } catch (err) {
     console.error(err);
@@ -583,6 +647,157 @@ async function onExportYearFeeExcel() {
     showToast((err && err.message) || '导出失败');
   } finally {
     exportingFeeYear.value = false;
+  }
+}
+
+/* ───── 数据看板 ───── */
+
+function onOpenDashboard() {
+  appView.value = 'dashboard';
+}
+
+/* ───── 学生详情 ───── */
+
+function onOpenStudent(studentName) {
+  if (!studentName) return;
+  appView.value = 'day';
+  showStudentDetail.value = true;
+}
+
+/* ───── 课程模板 ───── */
+
+function onOpenTemplateManager() {
+  showTemplateManager.value = true;
+}
+
+function onOpenCourseManager() {
+  showCourseManager.value = true;
+}
+
+function onSaveAsTemplate() {
+  const form = feedbackFormState;
+  const students = studentsDraft.value
+    .filter(s => String(s.name || '').trim())
+    .map(s => s.name.trim());
+  window.__templateSource = {
+    course: String(form.subject || '').trim(),
+    lessonSchedule: String(form.classSchedule || '').trim(),
+    lessonType: form.lessonType,
+    classHours: form.classHours,
+    feeRate: form.feeRate,
+    headCount: form.headCount,
+    students,
+    teacher: String(form.teacher || '').trim(),
+    courseContent: String(form.courseContent || '').trim(),
+  };
+  showTemplateManager.value = true;
+}
+
+function onApplyTemplate(tpl) {
+  if (!tpl) return;
+  feedbackFormState.subject = tpl.course || 'C++';
+  feedbackFormState.classSchedule = tpl.lessonSchedule || '';
+  feedbackFormState.lessonType = tpl.lessonType === 'retail' ? 'retail' : 'regular';
+  feedbackFormState.classHours = tpl.classHours != null ? String(tpl.classHours) : '';
+  feedbackFormState.feeRate = tpl.feeRate != null ? String(tpl.feeRate) : '';
+  feedbackFormState.headCount = tpl.headCount != null ? String(tpl.headCount) : '1';
+  feedbackFormState.teacher = tpl.teacher || '';
+  feedbackFormState.courseContent = tpl.courseContent || '';
+  if (Array.isArray(tpl.students)) {
+    studentsDraft.value = tpl.students
+      .filter(n => String(n || '').trim())
+      .map(n => createStudentDraft(String(n).trim()));
+  } else {
+    studentsDraft.value = [];
+  }
+  showTemplateManager.value = false;
+  showToast('已应用模板「' + tpl.name + '」');
+}
+
+/* ───── 课程分类管理 ───── */
+
+async function onSaveCourseList(list) {
+  const saved = await setCourseList(list);
+  courseSuggestions.value = saved;
+  showToast('课程分类已更新');
+}
+
+/* ───── 积分表 ───── */
+
+async function onOpenPointsConfig() {
+  try {
+    const [catMap, schMap, tchName] = await Promise.all([
+      getPointsCourseCategories(),
+      getPointsSchoolNames(),
+      getPointsTeacherName(),
+    ]);
+    pointsCategoryMap.value = { ...catMap };
+    pointsSchoolMap.value = { ...schMap };
+    if (String(tchName || '').trim()) {
+      pointsTeacherName.value = String(tchName).trim();
+    }
+    showPointsConfig.value = true;
+    showSettings.value = false;
+  } catch (err) {
+    showToast('加载设置失败', 'error');
+  }
+}
+
+function onSavePointsConfig({ categories, schools }) {
+  if (categories) {
+    pointsCategoryMap.value = { ...categories };
+    setPointsCourseCategories(categories);
+  }
+  if (schools) {
+    pointsSchoolMap.value = { ...schools };
+    setPointsSchoolNames(schools);
+  }
+}
+
+function onAddNonTeaching() {
+  nonTeachingItems.value = [...nonTeachingItems.value, { content: '', hours: 0 }];
+}
+
+function onRemoveNonTeaching(index) {
+  const next = nonTeachingItems.value.slice();
+  next.splice(index, 1);
+  nonTeachingItems.value = next;
+}
+
+function onUpdateNonTeaching({ index, field, value }) {
+  const next = nonTeachingItems.value.slice();
+  if (next[index]) {
+    if (field === 'hours') {
+      next[index] = { ...next[index], hours: value === '' ? 0 : parseFloat(value) || 0 };
+    } else {
+      next[index] = { ...next[index], [field]: value };
+    }
+  }
+  nonTeachingItems.value = next;
+}
+
+async function onExportPointsTable() {
+  if (exportingPoints.value) return;
+  /* 自动保存教师姓名 */
+  const name = String(pointsTeacherName.value || '').trim();
+  if (name) {
+    setPointsTeacherName(name);
+  }
+  exportingPoints.value = true;
+  try {
+    const title = await exportPointsTableExcel(
+      records.value,
+      pointsMonth.value,
+      pointsTeacherName.value,
+      pointsCategoryMap.value,
+      nonTeachingItems.value,
+      pointsSchoolMap.value,
+    );
+    showToast(`已导出：${title}`);
+  } catch (err) {
+    showToast((err && err.message) || '导出失败');
+  } finally {
+    exportingPoints.value = false;
   }
 }
 
@@ -695,17 +910,30 @@ function closeRecordDetailModal() {
   resetDetailTempImageSelection();
 }
 
-async function onDeleteRecord() {
+function requestDeleteRecord() {
   if (!currentRecord.value || !currentRecord.value.id) return;
+  showDeleteConfirm.value = true;
+  deletingRecordId.value = currentRecord.value.id;
+}
+
+async function onConfirmDelete() {
+  if (!deletingRecordId.value) return;
   try {
-    await deleteRecordById(currentRecord.value.id);
+    await deleteRecordById(deletingRecordId.value);
+    showDeleteConfirm.value = false;
+    deletingRecordId.value = null;
     closeRecordDetailModal();
     currentRecord.value = null;
     await refreshRecords();
     showToast('已删除');
   } catch (err) {
-    showToast('删除失败');
+    showToast('删除失败', 'error');
   }
+}
+
+function onCancelDelete() {
+  showDeleteConfirm.value = false;
+  deletingRecordId.value = null;
 }
 
 async function onShareRecord() {
@@ -728,6 +956,19 @@ async function onShareRecord() {
   } catch (err) {
     showToast('分享失败，请改用复制文案');
   }
+}
+
+async function onShareSuccessRecord() {
+  if (!lastSavedRecord.value) return;
+  const res = await shareLessonRecordViaSystem(lastSavedRecord.value).catch(() => null);
+  if (res && res.ok) {
+    showToast('已调起分享');
+    return;
+  }
+  if (res && res.cancelled) return;
+  /* 分享调用失败则回退到复制 */
+  const copied = await copyPasteTextPromise(lastSavedText.value);
+  showToast(copied ? '已复制文字，请到微信粘贴' : '复制失败');
 }
 
 async function onCopyRecordText() {
@@ -954,7 +1195,13 @@ onMounted(async () => {
   exportMonth.value = formatYearMonth(new Date());
   exportFeeYear.value = String(new Date().getFullYear());
 
-  const draft = getFeedbackDraft();
+  const [draft, catMap, tchName, schMap] = await Promise.all([
+    getFeedbackDraft(),
+    getPointsCourseCategories(),
+    getPointsTeacherName(),
+    getPointsSchoolNames(),
+  ]);
+
   if (draft && draft.form) {
     Object.assign(feedbackFormState, draft.form);
     if (Array.isArray(draft.students)) {
@@ -965,7 +1212,17 @@ onMounted(async () => {
     }
   }
 
-  const slots = await getTimeSlotSuggestions();
+  pointsCategoryMap.value = { ...catMap };
+  pointsSchoolMap.value = { ...schMap };
+  if (String(tchName || '').trim()) {
+    pointsTeacherName.value = String(tchName).trim();
+  }
+
+  const [courseList, slots] = await Promise.all([
+    getCourseList(),
+    getTimeSlotSuggestions(),
+  ]);
+  courseSuggestions.value = courseList;
   if (slots && slots.length) {
     const merged = [...timeSlotSuggestions.value];
     for (let i = 0; i < slots.length; i++) {
@@ -992,29 +1249,38 @@ onBeforeUnmount(() => {
     class="mx-auto max-w-md px-4 py-6 pt-[max(1.5rem,env(safe-area-inset-top))]"
     :class="appView === 'calendar' ? 'pb-24' : 'pb-[env(safe-area-inset-bottom)]'"
   >
-    <CalendarMonthView
-      v-if="appView === 'calendar'"
-      v-model:year-month="selectedMonth"
-      :records-by-date="recordsByDate"
-      :today-iso="todayIso"
-      @select-day="onSelectDay"
-      @open-settings="showSettings = true"
-    />
+    <Transition name="view-slide" mode="out-in">
+      <CalendarMonthView
+        v-if="appView === 'calendar'" key="calendar"
+        v-model:year-month="selectedMonth"
+        :records-by-date="recordsByDate"
+        :today-iso="todayIso"
+        @select-day="onSelectDay"
+        @open-settings="showSettings = true"
+        @open-dashboard="onOpenDashboard"
+      />
 
-    <DayLessonsView
-      v-else-if="appView === 'day'"
-      :iso-date="selectedDate"
-      :records="dayRecords"
-      :day-summary="daySummary"
-      @back="onBackToCalendar"
-      @add-lesson="startAddLesson"
-      @edit-record="startEditLesson"
-      @open-record="openRecord"
-    />
+      <DataDashboard
+        v-else-if="appView === 'dashboard'" key="dashboard"
+        :records="records"
+        @back="onBackToCalendar"
+      />
 
-    <LessonEditorView
-      v-else-if="appView === 'lesson'"
-      :iso-date="selectedDate"
+      <DayLessonsView
+        v-else-if="appView === 'day'" key="day"
+        :iso-date="selectedDate"
+        :records="dayRecords"
+        :day-summary="daySummary"
+        @back="onBackToCalendar"
+        @add-lesson="startAddLesson"
+        @edit-record="startEditLesson"
+        @open-record="openRecord"
+        @open-student="onOpenStudent"
+      />
+
+      <LessonEditorView
+        v-else-if="appView === 'lesson'" key="lesson"
+        :iso-date="selectedDate"
       :photo-hint="photoHint"
       :preview-url="previewUrl"
       :course="feedbackFormState.subject"
@@ -1059,7 +1325,12 @@ onBeforeUnmount(() => {
       @load-common="onLoadCommonStudents"
       @save-copy="onSaveCopy"
       @export-excel="onExportExcel"
+      @open-student="onOpenStudent"
+      @open-template-manager="onOpenTemplateManager"
+      @save-as-template="onSaveAsTemplate"
+      @open-course-manager="onOpenCourseManager"
     />
+    </Transition>
 
     <input
       ref="restoreInputRef"
@@ -1079,6 +1350,7 @@ onBeforeUnmount(() => {
         showSaveSuccess = false;
         clearCurrentPhotoSelection();
       "
+      @share="onShareSuccessRecord"
     />
 
     <SettingsSheet
@@ -1090,6 +1362,10 @@ onBeforeUnmount(() => {
       :exporting-zip="exportingZip"
       :exporting-fee-month="exportingFeeMonth"
       :exporting-fee-year="exportingFeeYear"
+      :points-month="pointsMonth"
+      :points-teacher-name="pointsTeacherName"
+      :exporting-points="exportingPoints"
+      :non-teaching-items="nonTeachingItems"
       @close="showSettings = false"
       @open-timetable="
         showSettings = false;
@@ -1098,6 +1374,10 @@ onBeforeUnmount(() => {
       @open-batch-import="
         showSettings = false;
         showBatchImport = true;
+      "
+      @open-course-manager="
+        showSettings = false;
+        showCourseManager = true;
       "
       @update:filter-text="filterText = $event"
       @update:export-month="exportMonth = $event"
@@ -1109,6 +1389,13 @@ onBeforeUnmount(() => {
       @backup="onBackupRecords"
       @restore="onRestoreClick"
       @open-record="openRecord"
+      @update:points-month="pointsMonth = $event"
+      @update:points-teacher-name="pointsTeacherName = $event"
+      @export-points="onExportPointsTable"
+      @open-points-config="onOpenPointsConfig"
+      @add-non-teaching="onAddNonTeaching"
+      @remove-non-teaching="onRemoveNonTeaching"
+      @update-non-teaching="onUpdateNonTeaching"
     />
 
     <TimetableModal
@@ -1129,6 +1416,15 @@ onBeforeUnmount(() => {
 
     <BatchImportModal :visible="showBatchImport" :rows="[]" @close="showBatchImport = false" />
 
+    <PointsConfigModal
+      :visible="showPointsConfig"
+      :records="records"
+      :category-map="pointsCategoryMap"
+      :school-map="pointsSchoolMap"
+      @close="showPointsConfig = false"
+      @save="onSavePointsConfig"
+    />
+
     <RecordDetailModal
       :visible="showRecordDetail"
       :record="currentRecord"
@@ -1146,11 +1442,69 @@ onBeforeUnmount(() => {
       @update:head-count="detailEditValues.headCount = $event"
       @replace-image="onReplaceDetailImage"
       @remove-image="onRemoveDetailImage"
-      @delete="onDeleteRecord"
+      @delete="requestDeleteRecord"
       @copy="onCopyRecordText"
       @share="onShareRecord"
       @save="onSaveRecordDetail"
+      @open-student="onOpenStudent"
     />
+
+    <!-- 学生详情弹窗 -->
+    <StudentDetailModal
+      :visible="showStudentDetail"
+      :records="records"
+      @close="showStudentDetail = false"
+      @open-record="openRecord"
+    />
+
+    <!-- 课程模板弹窗 -->
+    <TemplateManagerModal
+      :visible="showTemplateManager"
+      @close="showTemplateManager = false"
+      @apply-template="onApplyTemplate"
+    />
+
+    <!-- 课程分类管理弹窗 -->
+    <CourseManagerModal
+      :visible="showCourseManager"
+      :courses="courseSuggestions"
+      @close="showCourseManager = false"
+      @save="onSaveCourseList"
+    />
+
+    <!-- 删除确认弹窗 -->
+    <div
+      class="fixed inset-0 z-[190] flex items-center justify-center bg-slate-900/65 p-4"
+      :class="showDeleteConfirm ? '' : 'hidden'"
+      @click="onCancelDelete"
+    >
+      <div
+        class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl space-y-4"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="deleteConfirmTitle"
+        @click.stop
+      >
+        <h3 id="deleteConfirmTitle" class="text-lg font-semibold text-slate-900">确认删除</h3>
+        <p class="text-sm text-slate-600">此操作不可撤销，该条记录（含图片、学生名单、费用信息）将被永久删除。</p>
+        <div class="flex gap-3">
+          <button
+            type="button"
+            class="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 active:bg-slate-50"
+            @click="onCancelDelete"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="flex-1 rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-sm active:bg-rose-700"
+            @click="onConfirmDelete"
+          >
+            确认删除
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div
@@ -1166,13 +1520,31 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    class="pointer-events-none fixed left-1/2 z-[200] w-[min(92vw,22rem)] -translate-x-1/2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm leading-snug text-white shadow-xl shadow-slate-900/20 transition-opacity duration-200"
+    class="pointer-events-none fixed left-1/2 z-[200] w-[min(92vw,22rem)] -translate-x-1/2 rounded-2xl px-4 py-3 text-center text-sm leading-snug text-white shadow-xl shadow-slate-900/20 transition-opacity duration-200"
     style="bottom: max(1.25rem, env(safe-area-inset-bottom))"
     :class="[
       toastVisible ? 'opacity-100' : 'opacity-0 hidden',
       appView === 'calendar' ? '!bottom-20' : '',
+      toastType === 'error' ? 'bg-rose-700' : toastType === 'success' ? 'bg-emerald-700' : 'bg-slate-900',
     ]"
   >
+    <span v-if="toastType === 'error'" class="mr-1.5">✕</span>
+    <span v-else-if="toastType === 'success'" class="mr-1.5">✓</span>
     {{ toastMessage }}
   </div>
 </template>
+
+<style>
+.view-slide-enter-active,
+.view-slide-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.view-slide-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+.view-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+</style>

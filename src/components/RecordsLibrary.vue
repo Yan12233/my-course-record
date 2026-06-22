@@ -28,6 +28,22 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  pointsMonth: {
+    type: String,
+    default: '',
+  },
+  pointsTeacherName: {
+    type: String,
+    default: '',
+  },
+  exportingPoints: {
+    type: Boolean,
+    default: false,
+  },
+  nonTeachingItems: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const emit = defineEmits([
@@ -41,6 +57,13 @@ const emit = defineEmits([
   'export-fee-month',
   'export-fee-year',
   'open-record',
+  'update:pointsMonth',
+  'update:pointsTeacherName',
+  'export-points',
+  'open-points-config',
+  'add-non-teaching',
+  'remove-non-teaching',
+  'update-non-teaching',
 ]);
 </script>
 
@@ -153,6 +176,88 @@ const emit = defineEmits([
       </div>
     </section>
 
+    <section class="rounded-2xl border border-purple-200 bg-purple-50/40 px-4 py-4 shadow-sm space-y-3">
+      <h3 class="text-base font-semibold text-slate-900">积分表导出</h3>
+      <p class="text-xs text-slate-500">生成教师个人月度考核积分表（校内课 1分/课时 · 零售课 0.3分/人/课时 · 试听 0.6分/人次）</p>
+      <div class="flex gap-2">
+        <input
+          type="month"
+          class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+          :value="pointsMonth"
+          @input="emit('update:pointsMonth', $event.target.value)"
+        />
+        <button
+          type="button"
+          class="shrink-0 rounded-xl border border-purple-300 bg-white px-3 py-2.5 text-sm font-medium text-purple-800 active:bg-purple-50"
+          @click="emit('open-points-config')"
+        >
+          课程分类
+        </button>
+      </div>
+      <div class="space-y-1">
+        <label class="text-xs text-slate-500">教师姓名</label>
+        <input
+          type="text"
+          placeholder="输入教师姓名（如：严嘉诚）"
+          class="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+          :value="pointsTeacherName"
+          @input="emit('update:pointsTeacherName', $event.target.value)"
+        />
+      </div>
+      <details class="text-xs">
+        <summary class="cursor-pointer text-slate-500 hover:text-slate-700 select-none">
+          非教工作（可选）
+        </summary>
+        <div class="mt-2 space-y-1.5">
+          <div
+            v-for="(item, i) in nonTeachingItems"
+            :key="i"
+            class="flex gap-1.5 items-center"
+          >
+            <input
+              type="text"
+              placeholder="内容"
+              class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-purple-400"
+              :value="item.content"
+              @input="emit('update-non-teaching', { index: i, field: 'content', value: $event.target.value })"
+            />
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              placeholder="小时"
+              class="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+              :value="item.hours"
+              @input="emit('update-non-teaching', { index: i, field: 'hours', value: $event.target.value })"
+            />
+            <span class="text-xs w-10 text-right text-slate-600">{{ ((Number(item.hours) || 0) * 1).toFixed(1) }}分</span>
+            <button
+              type="button"
+              class="text-rose-500 hover:text-rose-700 shrink-0"
+              @click="emit('remove-non-teaching', i)"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            type="button"
+            class="text-indigo-600 hover:text-indigo-800 font-medium"
+            @click="emit('add-non-teaching')"
+          >
+            + 添加一条
+          </button>
+        </div>
+      </details>
+      <button
+        type="button"
+        class="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white active:bg-purple-700 disabled:opacity-60"
+        :disabled="exportingPoints"
+        @click="emit('export-points')"
+      >
+        {{ exportingPoints ? '导出中…' : '导出积分表' }}
+      </button>
+    </section>
+
     <ul class="space-y-2">
       <li
         v-for="item in records"
@@ -163,7 +268,7 @@ const emit = defineEmits([
           <div class="flex items-start justify-between gap-2">
             <p class="font-medium text-slate-900">{{ item.course || '（未填写课程）' }}</p>
             <span
-              class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+              class="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium"
               :class="item.lessonType === 'retail' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'"
             >
               {{ item.lessonType === 'retail' ? '零售' : '常规' }}

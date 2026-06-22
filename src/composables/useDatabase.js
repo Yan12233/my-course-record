@@ -8,6 +8,11 @@ const STORAGE_KEY_TIME_SLOT_SUGGESTIONS = 'time_slot_suggestions_v1';
 const STORAGE_KEY_TIMETABLE = 'my_timetable';
 const STORAGE_KEY_COMMON_STUDENT_NAMES = 'common_student_names_v1';
 const STORAGE_KEY_FEEDBACK_DRAFT = 'feedback_form_draft_v1';
+const STORAGE_KEY_POINTS_COURSE_CATEGORIES = 'points_course_categories_v1';
+const STORAGE_KEY_POINTS_TEACHER_NAME = 'points_teacher_name_v1';
+const STORAGE_KEY_POINTS_SCHOOL_NAMES = 'points_school_names_v1';
+const STORAGE_KEY_LESSON_TEMPLATES = 'lesson_templates_v1';
+const STORAGE_KEY_COURSE_LIST = 'course_list_v1';
 const TIMETABLE_WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 let configured = false;
@@ -378,6 +383,176 @@ export function useDatabase() {
     }
   }
 
+  /* ───── 积分表相关 ───── */
+
+  function getPointsCourseCategories() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_POINTS_COURSE_CATEGORIES).then((val) => {
+      if (val && typeof val === 'object' && !Array.isArray(val)) return val;
+      return {};
+    });
+  }
+
+  function setPointsCourseCategories(map) {
+    ensureConfigured();
+    const safe = {};
+    if (map && typeof map === 'object') {
+      for (const [k, v] of Object.entries(map)) {
+        if (v === 'trial') safe[String(k)] = 'trial';
+      }
+    }
+    return localforage.setItem(STORAGE_KEY_POINTS_COURSE_CATEGORIES, safe).then(() => safe);
+  }
+
+  function getPointsTeacherName() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_POINTS_TEACHER_NAME).then((val) => {
+      if (typeof val === 'string') return val;
+      return '';
+    });
+  }
+
+  function setPointsTeacherName(name) {
+    ensureConfigured();
+    const v = String(name || '').trim();
+    return localforage.setItem(STORAGE_KEY_POINTS_TEACHER_NAME, v).then(() => v);
+  }
+
+  function getPointsSchoolNames() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_POINTS_SCHOOL_NAMES).then((val) => {
+      if (val && typeof val === 'object' && !Array.isArray(val)) return val;
+      return {};
+    });
+  }
+
+  function setPointsSchoolNames(map) {
+    ensureConfigured();
+    const safe = {};
+    if (map && typeof map === 'object') {
+      for (const [k, v] of Object.entries(map)) {
+        safe[String(k)] = String(v || '').trim();
+      }
+    }
+    return localforage.setItem(STORAGE_KEY_POINTS_SCHOOL_NAMES, safe).then(() => safe);
+  }
+
+  /* ───── 课程模板 ───── */
+
+  function generateTemplateName(raw) {
+    const course = String(raw.course || '').trim().slice(0, 100);
+    const schedule = String(raw.lessonSchedule || '').trim().slice(0, 80);
+    let name = course || '未命名模板';
+    if (schedule) name = `${name} ${schedule}`;
+    return name.slice(0, 50);
+  }
+
+  function sanitizeLessonTemplate(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = raw.id ? String(raw.id) : generateRecordId();
+    const name = String(raw.name || '').trim().slice(0, 50) || generateTemplateName(raw);
+    const course = String(raw.course || '').trim().slice(0, 100);
+    const lessonSchedule = String(raw.lessonSchedule || '').trim().slice(0, 120);
+    const lessonType = raw.lessonType === 'retail' ? 'retail' : 'regular';
+    const classHours = normalizeNonNegativeNumber(raw.classHours);
+    const feeRate = normalizeNonNegativeNumber(raw.feeRate);
+    const headCount = Math.min(99, Math.max(1, normalizeHeadCount(raw.headCount) || 1));
+    const students = Array.isArray(raw.students)
+      ? raw.students.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 30)
+      : [];
+    const teacher = String(raw.teacher || '').trim().slice(0, 40);
+    const courseContent = String(raw.courseContent || '').trim().slice(0, 2000);
+    const now = Date.now();
+    return {
+      id,
+      name,
+      course,
+      lessonSchedule,
+      lessonType,
+      classHours,
+      feeRate,
+      headCount,
+      students,
+      teacher,
+      courseContent,
+      createdAt: typeof raw.createdAt === 'number' && !Number.isNaN(raw.createdAt) ? raw.createdAt : now,
+      updatedAt: now,
+    };
+  }
+
+  function getLessonTemplates() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_LESSON_TEMPLATES).then((arr) => {
+      const list = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const one = sanitizeLessonTemplate(list[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
+  }
+
+  function setLessonTemplates(list) {
+    ensureConfigured();
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeLessonTemplate(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_LESSON_TEMPLATES, safe).then(() => safe);
+  }
+
+  function saveLessonTemplate(raw) {
+    const tpl = sanitizeLessonTemplate(raw);
+    if (!tpl) return Promise.reject(new Error('模板数据无效'));
+    return getLessonTemplates().then((list) => {
+      list.push(tpl);
+      return setLessonTemplates(list).then(() => tpl);
+    });
+  }
+
+  function updateLessonTemplate(id, updater) {
+    return getLessonTemplates().then((list) => {
+      let changed = false;
+      const next = list.map((t) => {
+        if (t.id !== id) return t;
+        changed = true;
+        const updated = sanitizeLessonTemplate({ ...t, ...(typeof updater === 'function' ? updater(t) : updater) });
+        return updated || t;
+      });
+      if (!changed) throw new Error('模板不存在');
+      return setLessonTemplates(next).then(() => next);
+    });
+  }
+
+  function deleteLessonTemplate(id) {
+    return getLessonTemplates().then((list) => {
+      const next = list.filter((t) => t.id !== id);
+      if (next.length === list.length) throw new Error('模板不存在');
+      return setLessonTemplates(next).then(() => next);
+    });
+  }
+
+  /* ───── 课程分类管理 ───── */
+
+  function getCourseList() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_COURSE_LIST).then((arr) => {
+      if (Array.isArray(arr) && arr.length) return arr;
+      return ['C++', 'Python', 'Scratch', '信息学基础'];
+    });
+  }
+
+  function setCourseList(list) {
+    ensureConfigured();
+    const safe = Array.isArray(list)
+      ? list.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 50)
+      : [];
+    return localforage.setItem(STORAGE_KEY_COURSE_LIST, safe).then(() => safe);
+  }
+
   return {
     STORAGE_KEY_RECORDS,
     STORAGE_KEY_TIME_SLOT_SUGGESTIONS,
@@ -406,5 +581,18 @@ export function useDatabase() {
     getFeedbackDraft,
     setFeedbackDraft,
     clearFeedbackDraft,
+    getPointsCourseCategories,
+    setPointsCourseCategories,
+    getPointsTeacherName,
+    setPointsTeacherName,
+    getPointsSchoolNames,
+    setPointsSchoolNames,
+    getLessonTemplates,
+    setLessonTemplates,
+    saveLessonTemplate,
+    updateLessonTemplate,
+    deleteLessonTemplate,
+    getCourseList,
+    setCourseList,
   };
 }

@@ -8,7 +8,7 @@ const props = defineProps({
   todayIso: { type: String, default: '' },
 });
 
-const emit = defineEmits(['update:yearMonth', 'select-day', 'open-settings']);
+const emit = defineEmits(['update:yearMonth', 'select-day', 'open-settings', 'open-dashboard']);
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
 
@@ -73,6 +73,13 @@ function onDayClick(cell) {
       />
       <button
         type="button"
+        class="shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 active:bg-indigo-100"
+        @click="emit('open-dashboard')"
+      >
+        看板
+      </button>
+      <button
+        type="button"
         class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 active:bg-slate-50"
         @click="emit('open-settings')"
       >
@@ -95,13 +102,13 @@ function onDayClick(cell) {
           v-for="(cell, idx) in cells"
           :key="`${cell.iso}-${idx}`"
           type="button"
-          class="relative flex aspect-square flex-col items-center justify-center rounded-lg text-sm transition-colors"
+          class="relative flex aspect-square min-h-[44px] flex-col items-center justify-center rounded-lg text-sm transition-colors"
           :class="[
             cell.inMonth
               ? 'text-slate-800 active:bg-indigo-50 hover:bg-slate-50'
               : 'text-transparent pointer-events-none',
-            cell.iso === todayIso && cell.inMonth ? 'ring-2 ring-indigo-400 ring-offset-1' : '',
-            countForDate(cell.iso) > 0 && cell.inMonth ? 'font-semibold text-indigo-800' : '',
+            cell.iso === todayIso && cell.inMonth ? 'ring-3 ring-indigo-400 ring-offset-1' : '',
+            countForDate(cell.iso) > 0 && cell.inMonth ? 'font-semibold text-indigo-800 underline decoration-indigo-300 decoration-2 underline-offset-2' : '',
           ]"
           :disabled="!cell.inMonth"
           @click="onDayClick(cell)"
@@ -111,8 +118,8 @@ function onDayClick(cell) {
             v-if="cell.inMonth && countForDate(cell.iso) > 0"
             class="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex items-center gap-0.5"
           >
-            <span class="h-1.5 w-1.5 rounded-full bg-indigo-500" />
-            <span v-if="countForDate(cell.iso) > 1" class="text-[9px] text-indigo-600 leading-none">
+            <span class="h-2 w-2 rounded-full bg-indigo-500" />
+            <span v-if="countForDate(cell.iso) > 1" class="text-[11px] text-indigo-600 leading-none">
               {{ countForDate(cell.iso) }}
             </span>
           </span>

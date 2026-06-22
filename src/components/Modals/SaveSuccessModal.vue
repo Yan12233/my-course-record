@@ -4,9 +4,10 @@ defineProps({
   imageUrl: { type: String, default: '' },
   hint: { type: String, default: '' },
   envHint: { type: String, default: '' },
+  shareDisabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'sent']);
+const emit = defineEmits(['close', 'sent', 'share']);
 </script>
 
 <template>
@@ -27,9 +28,19 @@ const emit = defineEmits(['close', 'sent']);
       <div v-else class="rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
         本次记录无图片
       </div>
-      <div class="flex gap-2">
-        <button type="button" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" @click="emit('close')">关闭</button>
-        <button type="button" class="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white" @click="emit('sent')">已发送</button>
+      <div class="flex flex-col gap-2">
+        <button
+          type="button"
+          class="w-full rounded-lg bg-green-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm active:bg-green-700 disabled:opacity-40"
+          :disabled="shareDisabled"
+          @click="emit('share')"
+        >
+          📤 分享到微信群
+        </button>
+        <div class="flex gap-2">
+          <button type="button" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" @click="emit('close')">关闭</button>
+          <button type="button" class="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white" @click="emit('sent')">已发送</button>
+        </div>
       </div>
     </div>
   </div>

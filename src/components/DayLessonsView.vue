@@ -11,7 +11,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['back', 'add-lesson', 'edit-record', 'open-record']);
+const emit = defineEmits(['back', 'add-lesson', 'edit-record', 'open-record', 'open-student']);
 
 const dateLabel = computed(() => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(props.isoDate || '');
@@ -66,12 +66,22 @@ const dateLabel = computed(() => {
             <p v-if="formatLessonFeeBreakdown(item)" class="text-xs text-emerald-700 mt-0.5">
               {{ formatLessonFeeBreakdown(item) }}
             </p>
-            <span
-              class="inline-block mt-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
-              :class="item.lessonType === 'retail' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'"
-            >
-              {{ item.lessonType === 'retail' ? '零售课' : '常规课' }}
-            </span>
+            <div class="flex flex-wrap items-center gap-1 mt-1">
+              <span
+                class="inline-block rounded-md px-1.5 py-0.5 text-xs font-medium"
+                :class="item.lessonType === 'retail' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'"
+              >
+                {{ item.lessonType === 'retail' ? '零售课' : '常规课' }}
+              </span>
+              <span
+                v-for="s in (item.students || [])"
+                :key="s.name || s"
+                class="inline-block rounded-md bg-indigo-50 px-1.5 py-0.5 text-xs text-indigo-700 cursor-pointer active:bg-indigo-100"
+                @click.stop="emit('open-student', s.name || s)"
+              >
+                {{ s.name || s }}
+              </span>
+            </div>
           </div>
         </div>
         <div class="mt-2 flex gap-2">

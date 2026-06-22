@@ -118,14 +118,14 @@ const emit = defineEmits([
                 <div class="mt-1 flex gap-1">
                   <button
                     type="button"
-                    class="rounded border border-indigo-200 bg-white px-2 py-0.5 text-[11px] text-indigo-700"
+                    class="rounded border border-indigo-200 bg-white px-2 py-0.5 text-xs text-indigo-700"
                     @click="emit('begin-edit', it)"
                   >
                     编辑
                   </button>
                   <button
                     type="button"
-                    class="rounded border border-rose-200 bg-white px-2 py-0.5 text-[11px] text-rose-700"
+                    class="rounded border border-rose-200 bg-white px-2 py-0.5 text-xs text-rose-700"
                     @click="emit('delete', it.id)"
                   >
                     删除

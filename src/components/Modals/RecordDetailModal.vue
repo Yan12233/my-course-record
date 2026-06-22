@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { computeLessonFee, normalizeFeeNumber, normalizeHeadCount } from '../../utils/lessonFee';
+import { useLessonFeeDisplay } from '../../composables/useLessonFeeDisplay';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -37,44 +37,21 @@ const emit = defineEmits([
   'update:headCount',
   'replace-image',
   'remove-image',
+  'open-student',
 ]);
 
-const headCountOptions = Array.from({ length: 30 }, (_, i) => i + 1);
+const lessonTypeRef = computed(() => props.editValues.lessonType);
+const classHoursRef = computed(() => props.editValues.classHours);
+const feeRateRef = computed(() => props.editValues.feeRate);
+const headCountRef = computed(() => props.editValues.headCount);
 
-const headCountValue = computed(() => {
-  const n = normalizeHeadCount(props.editValues.headCount);
-  return n > 0 ? n : 1;
-});
-
-const computedTotal = computed(() =>
-  computeLessonFee({
-    lessonType: props.editValues.lessonType,
-    classHours: props.editValues.classHours,
-    feeRate: props.editValues.feeRate,
-    headCount: props.editValues.lessonType === 'retail' ? headCountValue.value : 0,
-  }),
+const { headCountOptions, headCountValue, breakdownText, stepHeadCount } = useLessonFeeDisplay(
+  lessonTypeRef, classHoursRef, feeRateRef, headCountRef,
 );
-
-const breakdownText = computed(() => {
-  const hours = normalizeFeeNumber(props.editValues.classHours);
-  const rate = normalizeFeeNumber(props.editValues.feeRate);
-  const total = computedTotal.value;
-  if (!hours || !rate || !total) return '';
-
-  if (props.editValues.lessonType === 'retail') {
-    return `${hours} 课时 × ${headCountValue.value} 人 × ¥${rate}/人·课时 = ¥${total}`;
-  }
-  return `${hours} 课时 × ¥${rate} = ¥${total}`;
-});
 
 function onReplaceImageChange(e) {
   const file = e.target?.files?.[0] || null;
   if (file) emit('replace-image', file);
-}
-
-function stepHeadCount(delta) {
-  const next = Math.max(1, Math.min(30, headCountValue.value + delta));
-  emit('update:headCount', String(next));
 }
 </script>
 
@@ -166,7 +143,7 @@ function stepHeadCount(delta) {
           <div class="space-y-1">
             <span class="text-xs text-slate-500">上课人数</span>
             <div class="flex items-center gap-2">
-              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="stepHeadCount(-1)">−</button>
+              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="emit('update:headCount', stepHeadCount(-1))">−</button>
               <select
                 class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
                 :value="headCountValue"
@@ -174,7 +151,7 @@ function stepHeadCount(delta) {
               >
                 <option v-for="n in headCountOptions" :key="n" :value="n">{{ n }} 人</option>
               </select>
-              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="stepHeadCount(1)">+</button>
+              <button type="button" class="h-9 w-9 rounded-lg border border-slate-300 text-slate-700" @click="emit('update:headCount', stepHeadCount(1))">+</button>
             </div>
           </div>
           <label class="space-y-1">
@@ -212,6 +189,21 @@ function stepHeadCount(delta) {
         </div>
         <p v-if="breakdownText" class="text-xs font-medium text-emerald-700">{{ breakdownText }}</p>
 
+        <!-- 学生名单 -->
+        <div v-if="record && Array.isArray(record.students) && record.students.length" class="space-y-1">
+          <span class="text-xs text-slate-500">学生</span>
+          <div class="flex flex-wrap gap-1">
+            <span
+              v-for="s in record.students"
+              :key="s.name || s"
+              class="inline-block rounded-md bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 cursor-pointer active:bg-indigo-100"
+              @click.stop="emit('open-student', s.name || s)"
+            >
+              {{ s.name || s }}
+            </span>
+          </div>
+        </div>
+
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-2 space-y-2">
           <img
             v-if="imageUrl"
@@ -222,7 +214,7 @@ function stepHeadCount(delta) {
           <div v-else class="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
             当前无图片
           </div>
-          <p class="text-[11px] text-slate-500">{{ imageHint }}</p>
+          <p class="text-xs text-slate-500">{{ imageHint }}</p>
           <div class="flex flex-wrap gap-2">
             <label class="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700 cursor-pointer">
               更换图片
@@ -238,11 +230,11 @@ function stepHeadCount(delta) {
             </button>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs" @click="emit('copy')">复制文案</button>
-          <button type="button" class="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700" @click="emit('share')">转发微信</button>
-          <button type="button" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white" @click="emit('save')">保存修改</button>
-          <button type="button" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs text-rose-700" @click="emit('delete')">删除</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs hover:bg-slate-50" @click="emit('copy')">复制文案</button>
+          <button type="button" class="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700 hover:bg-indigo-100" @click="emit('share')">转发微信</button>
+          <button type="button" class="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 ml-auto" @click="emit('save')">保存修改</button>
+          <button type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-500 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700" @click="emit('delete')">删除</button>
         </div>
       </div>
     </div>

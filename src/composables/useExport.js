@@ -93,10 +93,10 @@ export function useExport() {
       views: [{ showGridLines: false }],
     });
     worksheet.columns = [
-      { width: 14 },
-      { width: 28 },
-      { width: 14 },
-      { width: 36 },
+      { width: 16 },
+      { width: 34 },
+      { width: 16 },
+      { width: 42 },
     ];
     const titleFill = {
       type: 'pattern',
@@ -129,9 +129,10 @@ export function useExport() {
       });
     });
 
+    const contentLen = (formData.courseContent || '').length;
     const row5 = worksheet.addRow(['本次课程\n授课内容', formData.courseContent, '', '']);
     worksheet.mergeCells(`B${row5.number}:D${row5.number}`);
-    row5.height = 80;
+    row5.height = Math.max(60, Math.min(200, Math.ceil((contentLen || 1) / 40) * 14));
     row5.getCell(1).alignment = alignCenter;
     row5.getCell(2).alignment = alignLeft;
 
@@ -151,7 +152,7 @@ export function useExport() {
 
     formData.students.forEach((student) => {
       const textLen = student.feedback ? student.feedback.length : 0;
-      const singleRowHeight = Math.max(25, Math.ceil(textLen / 35) * 12);
+      const singleRowHeight = Math.max(28, Math.min(120, Math.ceil(textLen / 30) * 14));
       const rowA = worksheet.addRow([
         student.name,
         student.feedback,
@@ -189,9 +190,10 @@ export function useExport() {
     });
 
     [1, 2].forEach(() => {
-      const tailRow = worksheet.addRow(['XXX', '', '', '']);
+      const tailRow = worksheet.addRow(['', '', '', '']);
+      worksheet.getCell(`A${tailRow.number}`).value = 'XXX';
       worksheet.mergeCells(`B${tailRow.number}:D${tailRow.number}`);
-      tailRow.height = 25;
+      tailRow.height = 30;
       tailRow.getCell(1).alignment = alignCenter;
     });
 
@@ -591,6 +593,329 @@ export function useExport() {
     return fileTitle;
   }
 
+  /* ───── 积分表导出 ───── */
+
+  async function exportPointsTableExcel(records, yearMonth, teacherName, categoryMap, nonTeachingItems, schoolMap) {
+    if (!yearMonth) throw new Error('请先选择月份');
+
+    const list = Array.isArray(records) ? records : [];
+    const inMonth = list.filter((r) => recordBelongsToMonth(r, yearMonth));
+    if (inMonth.length === 0) throw new Error('该月份没有任何记录');
+
+    const name = String(teacherName || '').trim() || '未填写';
+    const catMap = categoryMap && typeof categoryMap === 'object' ? categoryMap : {};
+    const schMap = schoolMap && typeof schoolMap === 'object' ? schoolMap : {};
+    const nonTeach = Array.isArray(nonTeachingItems) ? nonTeachingItems : [];
+    const monthDisplay = `${parseInt(yearMonth.split('-')[1], 10)}月`;
+
+    /* ── 聚合按类别分组 ── */
+    const schoolGroups = {};
+    const retailGroups = {};
+    const trialGroups = {};
+
+    for (let ri = 0; ri < inMonth.length; ri++) {
+      const rec = inMonth[ri];
+      if (!rec) continue;
+      const course = rec.course || '';
+      const isRetail = rec.lessonType === 'retail';
+      const isTrial = !isRetail && catMap[course] === 'trial';
+
+      if (isRetail) {
+        const className = rec.lessonSchedule || '未填时间段';
+        const hc = Math.max(
+          1,
+          rec.headCount > 0
+            ? rec.headCount
+            : Array.isArray(rec.students)
+              ? rec.students.length
+              : 1,
+        );
+        const key = className;
+        if (!retailGroups[key]) {
+          retailGroups[key] = { className, headCount: hc, singleHours: rec.classHours || 0, count: 0, totalHours: 0 };
+        }
+        const g = retailGroups[key];
+        g.count += 1;
+        g.totalHours = Number((g.totalHours + (rec.classHours || 0)).toFixed(2));
+      } else if (isTrial) {
+        const key = course || '未填课程';
+        if (!trialGroups[key]) trialGroups[key] = { course: key, count: 0 };
+        trialGroups[key].count += 1;
+      } else {
+        const schoolName =
+          schMap[rec.lessonSchedule] || rec.lessonSchedule || '未填学校';
+        const key = `${schoolName}||${rec.classHours || 0}`;
+        if (!schoolGroups[key]) {
+          schoolGroups[key] = { school: schoolName, singleHours: rec.classHours || 0, count: 0, totalHours: 0 };
+        }
+        const g = schoolGroups[key];
+        g.count += 1;
+        g.totalHours = Number((g.totalHours + (rec.classHours || 0)).toFixed(2));
+      }
+    }
+
+    const schoolItems = Object.values(schoolGroups).map((g) => ({
+      ...g,
+      scorePerHour: 1,
+      totalScore: Number((g.totalHours * 1).toFixed(2)),
+    }));
+    const retailItems = Object.values(retailGroups).map((g) => ({
+      ...g,
+      scorePerPersonPerHour: 0.3,
+      totalScore: Number((g.totalHours * g.headCount * 0.3).toFixed(2)),
+    }));
+    const trialItems = Object.values(trialGroups).map((g) => ({
+      ...g,
+      scorePerPersonPerHour: 0.6,
+      totalScore: Number((g.count * 0.6).toFixed(2)),
+    }));
+
+    /* ── 构建数据行 ── */
+    const dataRows = [];
+
+    for (let i = 0; i < schoolItems.length; i++) {
+      const it = schoolItems[i];
+      dataRows.push([
+        monthDisplay, name,
+        it.school, it.singleHours, it.count, it.totalHours, 1, it.totalScore,
+        '', '', '', '', '', '', '',
+        '', '', '', '',
+        it.totalScore,
+        '', '',
+        '',
+      ]);
+    }
+    for (let i = 0; i < retailItems.length; i++) {
+      const it = retailItems[i];
+      dataRows.push([
+        monthDisplay, name,
+        '', '', '', '', '', '',
+        it.className, it.headCount, it.singleHours, it.count, it.totalHours, 0.3, it.totalScore,
+        '', '', '',
+        it.totalScore,
+        '', '',
+        '',
+      ]);
+    }
+    for (let i = 0; i < trialItems.length; i++) {
+      const it = trialItems[i];
+      dataRows.push([
+        monthDisplay, name,
+        '', '', '', '', '', '',
+        '', '', '', '', '', '', '',
+        it.course, it.count, 0.6, it.totalScore,
+        it.totalScore,
+        '', '',
+        '',
+      ]);
+    }
+
+    /* ── 汇总行 ── */
+    const sumSchool = schoolItems.reduce((s, it) => s + it.totalScore, 0);
+    const sumRetail = retailItems.reduce((s, it) => s + it.totalScore, 0);
+    const sumTrial = trialItems.reduce((s, it) => s + it.totalScore, 0);
+    const sumNonTeaching = nonTeach.reduce((s, it) => s + Math.max(0, Number(it.hours) || 0) * 1, 0);
+    const grandTeachingScore = Number((sumSchool + sumRetail + sumTrial).toFixed(2));
+    const grandNonTeachingScore = Number(sumNonTeaching.toFixed(2));
+
+    dataRows.push(Array(23).fill('')); // 空行
+
+    // 合计行：教学部分
+    dataRows.push([
+      '合计', '',
+      '', '', '', `校内:${sumSchool.toFixed(1)}`, '', sumSchool || '',
+      '', '', '', `零售:${sumRetail.toFixed(1)}`, '', '', sumRetail || '',
+      '', '', '', sumTrial || '',
+      grandTeachingScore,
+      '', '',
+      '',
+    ]);
+
+    /* ── 非教工作 ── */
+    if (nonTeach.length > 0) {
+      dataRows.push(Array(23).fill(''));
+      for (let i = 0; i < nonTeach.length; i++) {
+        const it = nonTeach[i];
+        const hrs = Math.max(0, Number(it.hours) || 0);
+        const score = Number((hrs * 1).toFixed(2));
+        dataRows.push([
+          '', '',
+          '', '', '', '', '', '',
+          '', '', '', '', '', '', '',
+          '', '', '', '',
+          '',
+          it.content || '', score,
+          score,
+        ]);
+      }
+      // 非教小计行
+      dataRows.push([
+        '非教合计', '',
+        '', '', '', '', '', '',
+        '', '', '', '', '', '', '',
+        '', '', '', '',
+        '',
+        '', grandNonTeachingScore,
+        grandNonTeachingScore,
+      ]);
+    }
+
+    // 最终合计（教学 + 非教）
+    const finalTotal = grandTeachingScore + grandNonTeachingScore;
+    dataRows.push([
+      `总积分:${finalTotal.toFixed(1)}`, '',
+      '', '', '', '', '', '',
+      '', '', '', '', '', '', '',
+      '', '', '', '',
+      finalTotal,
+      '', '',
+      '',
+    ]);
+
+    /* ── 生成 Excel ── */
+    const ExcelJS = await getExcelJS();
+    const saveAs = await getSaveAs();
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('积分表', { views: [{ showGridLines: false }] });
+
+    worksheet.columns = [
+      { width: 6 },  // A: 月份
+      { width: 8 },  // B: 姓名
+      { width: 24 }, // C: 学校
+      { width: 10 }, // D: 单次课时
+      { width: 8 },  // E: 月次数
+      { width: 10 }, // F: 合计课时
+      { width: 12 }, // G: 计分/每小时
+      { width: 10 }, // H: 合计计分
+      { width: 28 }, // I: 班次
+      { width: 10 }, // J: 上课人数
+      { width: 8 },  // K: 小时
+      { width: 8 },  // L: 月次数
+      { width: 10 }, // M: 合计课时
+      { width: 14 }, // N: 计分/人/小时
+      { width: 10 }, // O: 合计计分
+      { width: 16 }, // P: 课程
+      { width: 10 }, // Q: 试听人次
+      { width: 14 }, // R: 计分/人/小时
+      { width: 10 }, // S: 合计计分
+      { width: 10 }, // T: 总积分
+      { width: 20 }, // U: 内容
+      { width: 8 },  // V: 计分
+      { width: 10 }, // W: 非教合计
+    ];
+
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
+    const fontHeader = { name: '等线', size: 11, bold: true };
+    const fontDefault = { name: '宋体', size: 10 };
+    const alignCenter = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    const alignLeft = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    const thinBorder = {
+      top: { style: 'thin', color: { argb: 'FF000000' } },
+      left: { style: 'thin', color: { argb: 'FF000000' } },
+      bottom: { style: 'thin', color: { argb: 'FF000000' } },
+      right: { style: 'thin', color: { argb: 'FF000000' } },
+    };
+    const boldFont = { name: '宋体', size: 10, bold: true };
+
+    /* Row 1: 主表头 */
+    const r1 = worksheet.addRow([
+      '月份', '姓名',
+      '校内课（1/小时，助教0.2/小时）', null, null, null, null, null,
+      '零售课（0.3人/小时，一对一3倍课时人数为3，一对一1倍课时按0.5/h计分）', null, null, null, null, null, null,
+      '试听（0.6人/次）', null, null, null,
+      '总积分',
+      '非教工作（1分/小时）', null,
+      '非教合计',
+    ]);
+    r1.height = 50;
+    for (let c = 1; c <= 23; c++) {
+      const cell = r1.getCell(c);
+      cell.font = fontHeader;
+      cell.fill = headerFill;
+      cell.alignment = alignCenter;
+      cell.border = thinBorder;
+    }
+
+    /* Row 2: 子表头 */
+    const r2 = worksheet.addRow([
+      null, null,
+      '学校', '单次课时', '月次数', '合计课时', '计分/每小时', '合计计分',
+      '班次', '上课人数', '小时', '月次数', '合计课时', '计分/人/小时', '合计计分',
+      '课程', '试听人次', '计分/人/小时', '合计计分',
+      null,
+      '内容', '计分',
+      null,
+    ]);
+    r2.height = 24;
+    for (let c = 1; c <= 23; c++) {
+      const cell = r2.getCell(c);
+      cell.font = fontHeader;
+      cell.fill = headerFill;
+      cell.alignment = alignCenter;
+      cell.border = thinBorder;
+    }
+
+    /* 合并表头单元格 */
+    worksheet.mergeCells('A1:A2');
+    worksheet.mergeCells('B1:B2');
+    worksheet.mergeCells('C1:H1');
+    worksheet.mergeCells('I1:O1');
+    worksheet.mergeCells('P1:S1');
+    worksheet.mergeCells('T1:T2');
+    worksheet.mergeCells('U1:V1');
+    worksheet.mergeCells('W1:W2');
+
+    /* 数据行 */
+    const dataStartRow = 3;
+    let excelRowIdx = dataStartRow;
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const rowValues = dataRows[i];
+      const allEmpty = rowValues.every((v) => v === '' || v === null || v === undefined);
+      if (allEmpty) {
+        excelRowIdx++;
+        continue;
+      }
+      const excelRow = worksheet.addRow(rowValues);
+      const isTotalRow = rowValues[0] === '合计';
+
+      for (let c = 1; c <= rowValues.length; c++) {
+        const cell = excelRow.getCell(c);
+        cell.font = isTotalRow ? boldFont : fontDefault;
+        cell.alignment = alignCenter;
+        cell.border = thinBorder;
+      }
+      // 内容(U列) 左对齐
+      excelRow.getCell(21).alignment = alignLeft;
+
+      // 数字格式
+      for (const ci of [4, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 22, 23]) {
+        const v = excelRow.getCell(ci).value;
+        if (typeof v === 'number') {
+          excelRow.getCell(ci).numFmt = '0.0##';
+        }
+      }
+
+      excelRow.height = 22;
+      excelRowIdx++;
+    }
+
+    /* 合并 A & B 列数据区域 */
+    const lastDataRow = excelRowIdx - 1;
+    if (lastDataRow >= dataStartRow + 1) {
+      worksheet.mergeCells(`A${dataStartRow}:A${lastDataRow}`);
+      worksheet.mergeCells(`B${dataStartRow}:B${lastDataRow}`);
+    }
+
+    const fileName = `积分表_${yearMonth}_${name}.xlsx`;
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    saveAs(blob, fileName);
+    return fileName;
+  }
+
   return {
     sanitizeExcelFileNamePart,
     buildFeedbackExcelFilename,
@@ -605,5 +930,6 @@ export function useExport() {
     exportMonthZip,
     exportMonthFeeExcel,
     exportYearFeeExcel,
+    exportPointsTableExcel,
   };
 }

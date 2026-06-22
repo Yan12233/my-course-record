@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue';
 import PhotoUploader from './PhotoUploader.vue';
 import CourseForm from './CourseForm.vue';
 import LessonTypeBar from './LessonTypeBar.vue';
@@ -7,7 +8,7 @@ import FeedbackForm from './FeedbackForm.vue';
 import StudentManager from './StudentManager.vue';
 import ActionButtons from './ActionButtons.vue';
 
-defineProps({
+const props = defineProps({
   isoDate: { type: String, default: '' },
   photoHint: { type: String, default: '' },
   previewUrl: { type: String, default: '' },
@@ -56,11 +57,17 @@ const emit = defineEmits([
   'load-common',
   'save-copy',
   'export-excel',
+  'open-student',
+  'open-template-manager',
+  'save-as-template',
+  'open-course-manager',
 ]);
+
+const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl);
 </script>
 
 <template>
-  <section class="space-y-4">
+  <section class="space-y-4 pb-32">
     <header class="flex items-center gap-2">
       <button
         type="button"
@@ -76,7 +83,18 @@ const emit = defineEmits([
       <div class="w-[52px]" />
     </header>
 
+    <div v-if="lessonType !== 'retail' && !previewUrl" class="text-center">
+      <button
+        type="button"
+        class="text-xs font-medium text-indigo-600 underline-offset-2 hover:underline active:text-indigo-800"
+        @click="photoSectionOpen = !photoSectionOpen"
+      >
+        {{ photoSectionOpen ? '收起拍照' : '展开拍照（可选）' }}
+      </button>
+    </div>
+
     <PhotoUploader
+      v-if="photoSectionOpen"
       :photo-hint="photoHint"
       :preview-url="previewUrl"
       :show-batch="false"
@@ -98,7 +116,26 @@ const emit = defineEmits([
       @update:course="emit('update:course', $event)"
       @update:lesson-schedule="emit('update:lessonSchedule', $event)"
       @update:lesson-date="emit('update:lessonDate', $event)"
+      @open-course-manager="emit('open-course-manager')"
     />
+
+    <!-- 模板工具栏 -->
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700 active:bg-indigo-100"
+        @click="emit('open-template-manager')"
+      >
+        📋 加载模板
+      </button>
+      <button
+        type="button"
+        class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 active:bg-slate-50"
+        @click="emit('save-as-template')"
+      >
+        💾 保存为模板
+      </button>
+    </div>
 
     <LessonMetricsFields
       :lesson-type="lessonType"
@@ -142,6 +179,7 @@ const emit = defineEmits([
           @update-student-field="(idx, field, val) => emit('update-student-field', idx, field, val)"
           @save-common="emit('save-common')"
           @load-common="emit('load-common')"
+          @open-student="(name) => emit('open-student', name)"
         />
       </section>
       <button
@@ -154,6 +192,15 @@ const emit = defineEmits([
       </button>
     </template>
 
-    <ActionButtons :save-pending="savePending" @save-copy="emit('save-copy')" @export-excel="emit('export-excel')" />
+    <!-- 吸底按钮容器 -->
+    <div
+      class="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
+    >
+      <ActionButtons
+        :save-pending="savePending"
+        @save-copy="emit('save-copy')"
+        @export-excel="emit('export-excel')"
+      />
+    </div>
   </section>
 </template>
