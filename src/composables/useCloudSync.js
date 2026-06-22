@@ -139,7 +139,7 @@ async function proxyWebDAV(targetUrl, method, username, password, body) {
   if (res.status === 401 || res.status === 403) {
     throw new Error('认证失败，请检查账号和密码');
   }
-  if (!res.ok) {
+  if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => '');
     throw new Error(`${method} 返回 ${res.status}${text ? ': ' + text.slice(0, 200) : ''}`);
   }
@@ -148,15 +148,30 @@ async function proxyWebDAV(targetUrl, method, username, password, body) {
 
 /* ───── 连接测试 ───── */
 
+/**
+ * 测试 WebDAV 连接
+ * 尝试 GET 备份文件：
+ *   - 200 → 文件存在，连接正常
+ *   - 404 → 文件不存在但服务器可达（首次同步），连接正常
+ *   - 401/403 → 认证失败
+ *   - 其他 → 连接异常
+ */
 export async function testWebDAVConnection(serverUrl, username, password) {
   if (!serverUrl || !username || !password) {
     return { ok: false, message: '请填写完整的服务器地址、账号和密码' };
   }
 
   try {
-    const dirUrl = String(serverUrl || '').replace(/\/+$/, '') + '/';
-    await proxyWebDAV(dirUrl, 'PROPFIND', username, password);
-    return { ok: true, message: '连接成功 ✓' };
+    const fileUrl = getFileUrl(serverUrl);
+    const res = await proxyWebDAV(fileUrl, 'GET', username, password);
+    // 200=文件存在, 404=文件还未创建(第一次同步)
+    if (res.status === 200 || res.status === 404) {
+      return { ok: true, message: '连接成功 ✓' };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, message: '认证失败，请检查账号和密码' };
+    }
+    return { ok: false, message: `服务器返回 ${res.status}` };
   } catch (err) {
     const msg = err && err.message ? err.message : '网络错误';
     return { ok: false, message: `连接失败：${msg}` };
