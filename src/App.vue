@@ -13,6 +13,7 @@ import DataDashboard from './components/DataDashboard.vue';
 import StudentDetailModal from './components/Modals/StudentDetailModal.vue';
 import TemplateManagerModal from './components/Modals/TemplateManagerModal.vue';
 import CourseManagerModal from './components/Modals/CourseManagerModal.vue';
+import CloudSyncModal from './components/Modals/CloudSyncModal.vue';
 import { useDatabase } from './composables/useDatabase';
 import { useImageHandler } from './composables/useImageHandler';
 import { useExport } from './composables/useExport';
@@ -20,6 +21,7 @@ import { useShare } from './composables/useShare';
 import { buildRecordsByDateMap, sumRecords } from './composables/useLessonSummary';
 import { formatIsoLocalDate, formatYearMonth, recordBelongsToDate } from './utils/lessonDate';
 import { computeLessonFee, getRetailHeadCount, normalizeHeadCount } from './utils/lessonFee';
+import { loadSyncConfig, syncRecords } from './composables/useCloudSync';
 
 const {
   ensureConfigured,
@@ -594,6 +596,7 @@ async function onSaveCopy() {
     showToast(`保存失败：${(err && err.message) || '未知错误'}`);
   } finally {
     saveInFlight.value = false;
+    autoSyncIfEnabled();
   }
 }
 
@@ -648,6 +651,36 @@ async function onExportYearFeeExcel() {
   } finally {
     exportingFeeYear.value = false;
   }
+}
+
+/* ───── 云同步 ───── */
+const showCloudSync = ref(false);
+
+function onOpenCloudSync() {
+  showSettings.value = false;
+  showCloudSync.value = true;
+}
+
+function onSyncComplete(mergedRecords) {
+  if (mergedRecords && Array.isArray(mergedRecords)) {
+    records.value = mergedRecords;
+    setAllRecords(mergedRecords).catch(() => {});
+  }
+  showCloudSync.value = false;
+}
+
+/** 如果开启了自动同步，在后台执行同步并合并结果 */
+async function autoSyncIfEnabled() {
+  try {
+    const cfg = await loadSyncConfig();
+    if (!cfg.enabled) return;
+    syncRecords(cfg.serverUrl, cfg.username, cfg.password, records.value).then(res => {
+      if (res.ok && res.records && res.records.length) {
+        records.value = res.records;
+        setAllRecords(res.records).catch(() => {});
+      }
+    }).catch(() => {});
+  } catch {} // 静默，不影响主流程
 }
 
 /* ───── 数据看板 ───── */
@@ -1233,6 +1266,9 @@ onMounted(async () => {
 
   await refreshRecords();
   await refreshTimetable();
+
+  /* 启动后尝试自动同步 */
+  autoSyncIfEnabled();
 });
 
 onBeforeUnmount(() => {
@@ -1379,6 +1415,7 @@ onBeforeUnmount(() => {
         showSettings = false;
         showCourseManager = true;
       "
+      @open-cloud-sync="onOpenCloudSync"
       @update:filter-text="filterText = $event"
       @update:export-month="exportMonth = $event"
       @export-month-zip="onExportMonthZip"
@@ -1470,6 +1507,14 @@ onBeforeUnmount(() => {
       :courses="courseSuggestions"
       @close="showCourseManager = false"
       @save="onSaveCourseList"
+    />
+
+    <!-- 云同步弹窗 -->
+    <CloudSyncModal
+      :visible="showCloudSync"
+      :records="records"
+      @close="showCloudSync = false"
+      @sync-complete="onSyncComplete"
     />
 
     <!-- 删除确认弹窗 -->
