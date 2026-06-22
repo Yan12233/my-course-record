@@ -249,33 +249,46 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
       return { ok: true, message: '已上传本地数据', records: localRecords };
     }
 
-    const merged = new Map();
-    for (const r of strippedLocal) {
-      if (r && r.id) merged.set(r.id, { ...r });
+    // 合并：以本地完整记录（含图片）为基础，用云端文本记录覆盖
+    const mergedMap = new Map();
+    for (const r of localRecords) {
+      if (r && r.id) mergedMap.set(r.id, { ...r });
     }
+
     let mergeCount = 0;
     for (const r of remoteRecords) {
       if (r && r.id) {
-        const existing = merged.get(r.id);
+        const existing = mergedMap.get(r.id);
         if (!existing) {
-          merged.set(r.id, { ...r });
+          // 云端独有的记录（文本-only）
+          mergedMap.set(r.id, { ...r });
           mergeCount++;
         } else if ((r.updatedAt || 0) > (existing.updatedAt || 0)) {
-          merged.set(r.id, { ...r });
+          // 云端更新 → 覆盖文本字段，保留本地图片
+          const merged = { ...existing, ...r };
+          if (existing.imageBase64 && !r.imageBase64) {
+            merged.imageBase64 = existing.imageBase64;
+            merged.imageFileName = existing.imageFileName;
+            merged.imageMimeType = existing.imageMimeType;
+          }
+          mergedMap.set(r.id, merged);
           mergeCount++;
         }
       }
     }
 
-    const mergedRecords = Array.from(merged.values());
-    await uploadToWebDAV(serverUrl, username, password, mergedRecords);
+    const mergedRecords = Array.from(mergedMap.values());
+
+    // 上传文本版本到云端
+    const strippedMerged = stripRecordsForSync(mergedRecords);
+    await uploadToWebDAV(serverUrl, username, password, strippedMerged);
 
     const msg = isFirstSync
       ? `首次同步完成，已上传 ${mergedRecords.length} 条记录`
       : `同步完成，合并 ${mergeCount} 条更新，共 ${mergedRecords.length} 条记录`;
 
     await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: true, lastSyncMessage: msg });
-    return { ok: true, message: msg, records: localRecords };
+    return { ok: true, message: msg, records: mergedRecords };
   } catch (err) {
     const msg = `同步失败：${err && err.message ? err.message : '未知错误'}`;
     await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: false, lastSyncMessage: msg });
