@@ -141,7 +141,8 @@ async function proxyWebDAV(targetUrl, method, username, password, body) {
   }
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => '');
-    throw new Error(`${method} 返回 ${res.status}${text ? ': ' + text.slice(0, 200) : ''}`);
+    const detail = text ? text.slice(0, 300) : '';
+    throw new Error(`${method} 返回 ${res.status}${detail ? ': ' + detail : ''}`);
   }
   return res;
 }
@@ -197,6 +198,26 @@ async function uploadToWebDAV(serverUrl, username, password, data) {
   return true;
 }
 
+/**
+ * 去除记录中的大字段（图片等），只同步文本数据
+ */
+function stripLargeFields(record) {
+  if (!record || typeof record !== 'object') return record;
+  const clone = { ...record };
+  delete clone.imageBase64;
+  delete clone.imageFileName;
+  delete clone.imageMimeType;
+  return clone;
+}
+
+/**
+ * 将记录列表中的大字段去除，只保留文本数据用于同步
+ */
+function stripRecordsForSync(records) {
+  if (!Array.isArray(records)) return [];
+  return records.map(r => stripLargeFields(r));
+}
+
 /* ───── 同步 ───── */
 
 export async function syncRecords(serverUrl, username, password, localRecords) {
@@ -205,6 +226,9 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
   }
 
   try {
+    // 同步前剥离大字段（图片），只上传文本数据
+    const strippedLocal = stripRecordsForSync(localRecords);
+
     let remoteRecords = [];
     let isFirstSync = false;
     try {
@@ -215,18 +239,18 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
         isFirstSync = true;
       }
     } catch (downloadErr) {
-      if (!localRecords.length) {
+      if (!strippedLocal.length) {
         const msg = `首次同步失败：${downloadErr.message}`;
         await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: false, lastSyncMessage: msg });
         return { ok: false, message: msg, records: localRecords };
       }
-      await uploadToWebDAV(serverUrl, username, password, localRecords);
+      await uploadToWebDAV(serverUrl, username, password, strippedLocal);
       await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: true, lastSyncMessage: '已上传本地数据' });
       return { ok: true, message: '已上传本地数据', records: localRecords };
     }
 
     const merged = new Map();
-    for (const r of localRecords) {
+    for (const r of strippedLocal) {
       if (r && r.id) merged.set(r.id, { ...r });
     }
     let mergeCount = 0;
@@ -251,7 +275,7 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
       : `同步完成，合并 ${mergeCount} 条更新，共 ${mergedRecords.length} 条记录`;
 
     await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: true, lastSyncMessage: msg });
-    return { ok: true, message: msg, records: mergedRecords };
+    return { ok: true, message: msg, records: localRecords };
   } catch (err) {
     const msg = `同步失败：${err && err.message ? err.message : '未知错误'}`;
     await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: false, lastSyncMessage: msg });
