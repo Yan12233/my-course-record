@@ -123,7 +123,13 @@ async function proxyWebDAV(targetUrl, method, username, password, body) {
   };
 
   const fetchOpts = { method: 'POST', headers };
-  if (body != null) {
+
+  // PROPFIND 需要 Depth 头和 XML body
+  if (method === 'PROPFIND') {
+    headers['X-WebDAV-Depth'] = '0';
+    headers['Content-Type'] = 'application/xml;charset=utf-8';
+    fetchOpts.body = '<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>';
+  } else if (body != null) {
     headers['Content-Type'] = 'application/json;charset=utf-8';
     fetchOpts.body = body;
   }

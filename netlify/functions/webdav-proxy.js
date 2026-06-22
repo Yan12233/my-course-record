@@ -39,11 +39,15 @@ exports.handler = async (event) => {
   const contentType = event.headers['content-type'];
   if (contentType) forwardHeaders['Content-Type'] = contentType;
 
+  // PROPFIND 需要 Depth 头
+  const depth = event.headers['x-webdav-depth'];
+  if (depth) forwardHeaders['Depth'] = depth;
+
   try {
     const response = await fetch(targetUrl, {
       method: httpMethod,
       headers: forwardHeaders,
-      body: httpMethod === 'PUT' ? event.body : undefined,
+      body: (httpMethod === 'PUT' || httpMethod === 'PROPFIND') ? event.body : undefined,
     });
 
     const responseBody = await response.text();
@@ -70,7 +74,7 @@ function corsHeaders(event) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, PUT, POST, PROPFIND, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Target-URL, X-HTTP-Method',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Target-URL, X-HTTP-Method, X-WebDAV-Depth',
     'Access-Control-Max-Age': '86400',
   };
 }
