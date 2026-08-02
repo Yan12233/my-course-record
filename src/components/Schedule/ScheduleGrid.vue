@@ -88,81 +88,96 @@ function isConflictCell(weekday, slotStart) {
 </script>
 
 <template>
-  <div class="schedule-grid overflow-x-auto">
-    <div class="min-w-[700px]">
-      <!-- 表头行 -->
-      <div class="grid gap-1 mb-1" style="grid-template-columns: 64px repeat(7, 1fr)">
-        <div class="text-[10px] text-slate-400 dark:text-slate-500 text-center flex items-center justify-center">时段</div>
-        <div
-          v-for="day in weekdays"
-          :key="day"
-          class="text-xs font-semibold text-center py-1.5 rounded-lg"
-          :class="day === todayWeekday
-            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-            : 'text-slate-500 dark:text-slate-400'"
-        >
-          {{ day }}
-        </div>
-      </div>
-
-      <!-- 固定时段行 -->
+  <div>
+    <!-- 滚动容器：iOS 平滑滚动 + 细滚动条 -->
+    <div
+      class="schedule-grid overflow-x-auto relative"
+      style="-webkit-overflow-scrolling: touch; scrollbar-width: thin;"
+    >
+      <!-- 右侧渐隐遮罩：提示有更多内容 -->
       <div
-        v-for="slotRow in slots"
-        :key="slotRow.id"
-        class="grid gap-1 mb-1"
-        style="grid-template-columns: 64px repeat(7, 1fr)"
-      >
-        <!-- 时段标签 -->
-        <div class="flex flex-col items-center justify-center text-[10px] text-slate-400 dark:text-slate-500 py-1">
-          <span class="font-medium">{{ slotRow.start }}</span>
-          <span>{{ slotRow.end }}</span>
-        </div>
-        <!-- 每天的格子 -->
-        <div
-          v-for="day in weekdays"
-          :key="`${slotRow.id}-${day}`"
-          :data-cell-weekday="day"
-          :data-cell-slot-start="slotRow.start"
-          class="schedule-cell min-h-[56px] rounded-lg border border-dashed border-slate-200 dark:border-slate-700 cursor-pointer transition-colors hover:border-indigo-300 dark:hover:border-indigo-700 p-1"
-          :class="isConflictCell(day, slotRow.start) ? 'schedule-cell-conflict border-rose-400' : ''"
-          @click="onCellClick(day, slotRow)"
-        >
-          <ScheduleCard
-            v-for="item in getCellItems(day, slotRow)"
-            :key="item.id"
-            :item="item"
-            :color-class="getColorClass(item.course)"
-            @click="onCardClick"
-            @drop="onCardDrop"
-            @record="onCardRecord"
-          />
-        </div>
-      </div>
+        class="pointer-events-none absolute inset-y-0 right-0 w-10 z-10 md:hidden bg-gradient-to-l from-white dark:from-slate-900 to-transparent"
+      />
 
-      <!-- 其他时段行（排课项不在固定时段内时显示） -->
-      <div v-if="hasOtherSlotItems" class="grid gap-1 mb-1" style="grid-template-columns: 64px repeat(7, 1fr)">
-        <div class="flex items-center justify-center text-[10px] text-slate-400 dark:text-slate-500 py-1">
-          其他
+      <div class="min-w-[560px] px-4">
+        <!-- 表头行 -->
+        <div class="grid gap-1 mb-1" style="grid-template-columns: 40px repeat(7, 1fr)">
+          <div class="text-[10px] text-slate-400 dark:text-slate-500 text-center flex items-center justify-center">时段</div>
+          <div
+            v-for="day in weekdays"
+            :key="day"
+            class="text-xs font-semibold text-center py-1.5 rounded-lg"
+            :class="day === todayWeekday
+              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+              : 'text-slate-500 dark:text-slate-400'"
+          >
+            {{ day }}
+          </div>
         </div>
+
+        <!-- 固定时段行 -->
         <div
-          v-for="day in weekdays"
-          :key="`other-${day}`"
-          :data-cell-weekday="day"
-          data-cell-slot-start="__other__"
-          class="schedule-cell min-h-[56px] rounded-lg border border-dashed border-slate-200 dark:border-slate-700 p-1"
-          @click="onCellClick(day, null)"
+          v-for="slotRow in slots"
+          :key="slotRow.id"
+          class="grid gap-1 mb-1"
+          style="grid-template-columns: 40px repeat(7, 1fr)"
         >
-          <ScheduleCard
-            v-for="item in getCellItems(day, null)"
-            :key="item.id"
-            :item="item"
-            :color-class="getColorClass(item.course)"
-            @click="onCardClick"
-            @drop="onCardDrop"
-            @record="onCardRecord"
-          />
+          <!-- 时段标签：只显示起始小时 -->
+          <div class="flex items-center justify-center text-[10px] text-slate-400 dark:text-slate-500 py-1">
+            <span class="font-medium">{{ slotRow.start.split(':')[0] }}</span>
+          </div>
+          <!-- 每天的格子 -->
+          <div
+            v-for="day in weekdays"
+            :key="`${slotRow.id}-${day}`"
+            :data-cell-weekday="day"
+            :data-cell-slot-start="slotRow.start"
+            class="schedule-cell min-h-[56px] rounded-lg border border-dashed border-slate-200 dark:border-slate-700 cursor-pointer transition-colors hover:border-indigo-300 dark:hover:border-indigo-700 p-1"
+            :class="isConflictCell(day, slotRow.start) ? 'schedule-cell-conflict border-rose-400' : ''"
+            @click="onCellClick(day, slotRow)"
+          >
+            <ScheduleCard
+              v-for="item in getCellItems(day, slotRow)"
+              :key="item.id"
+              :item="item"
+              :color-class="getColorClass(item.course)"
+              @click="onCardClick"
+              @drop="onCardDrop"
+              @record="onCardRecord"
+            />
+          </div>
+        </div>
+
+        <!-- 其他时段行（排课项不在固定时段内时显示） -->
+        <div v-if="hasOtherSlotItems" class="grid gap-1 mb-1" style="grid-template-columns: 40px repeat(7, 1fr)">
+          <div class="flex items-center justify-center text-[10px] text-slate-400 dark:text-slate-500 py-1">
+            其他
+          </div>
+          <div
+            v-for="day in weekdays"
+            :key="`other-${day}`"
+            :data-cell-weekday="day"
+            data-cell-slot-start="__other__"
+            class="schedule-cell min-h-[56px] rounded-lg border border-dashed border-slate-200 dark:border-slate-700 p-1"
+            @click="onCellClick(day, null)"
+          >
+            <ScheduleCard
+              v-for="item in getCellItems(day, null)"
+              :key="item.id"
+              :item="item"
+              :color-class="getColorClass(item.course)"
+              @click="onCardClick"
+              @drop="onCardDrop"
+              @record="onCardRecord"
+            />
+          </div>
         </div>
       </div>
+    </div>
+
+    <!-- 移动端滚动提示 -->
+    <div class="mt-1.5 text-center text-[10px] text-slate-300 dark:text-slate-600 md:hidden select-none">
+      ← 左右滑动查看完整周课表 →
     </div>
   </div>
 </template>

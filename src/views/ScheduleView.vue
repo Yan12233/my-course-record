@@ -271,8 +271,9 @@ function onCardRecord(item) {
         </button>
       </div>
 
-      <!-- 排课网格 -->
+      <!-- 排课网格：-mx-4 让网格延伸至屏幕边缘，利用全宽展示更多列 -->
       <ScheduleGrid
+        class="-mx-4"
         :items="scheduleStore.items"
         :slots="DEFAULT_SCHEDULE_SLOTS"
         :weekdays="TIMETABLE_WEEKDAYS"
