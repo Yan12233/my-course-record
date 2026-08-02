@@ -8,6 +8,10 @@ defineProps({
     type: String,
     default: '',
   },
+  errorText: {
+    type: String,
+    default: '',
+  },
 });
 
 const emit = defineEmits([
@@ -62,6 +66,7 @@ const emit = defineEmits([
       </button>
     </div>
 
+    <p v-if="errorText" class="text-xs font-medium text-rose-600">{{ errorText }}</p>
     <div class="space-y-2">
       <article
         v-for="(s, idx) in students"

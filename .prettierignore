@@ -1,0 +1,5 @@
+dist
+node_modules
+*.log
+netlify/functions
+教师个人积分表（严嘉诚）.xlsx

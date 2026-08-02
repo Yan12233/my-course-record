@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import PhotoUploader from './PhotoUploader.vue';
 import CourseForm from './CourseForm.vue';
 import LessonTypeBar from './LessonTypeBar.vue';
@@ -26,11 +26,13 @@ const props = defineProps({
   teacher: { type: String, default: '' },
   admin: { type: String, default: '' },
   classTime: { type: String, default: '' },
+  classTimeSlot: { type: Object, default: () => ({ start: '', end: '' }) },
   courseContent: { type: String, default: '' },
   students: { type: Array, default: () => [] },
   newStudentName: { type: String, default: '' },
   savePending: { type: Boolean, default: false },
   isEditMode: { type: Boolean, default: false },
+  formErrors: { type: Object, default: () => ({ photo: '', teacher: '', courseContent: '', students: '', course: '', classHours: '', feeRate: '' }) },
 });
 
 const emit = defineEmits([
@@ -47,6 +49,7 @@ const emit = defineEmits([
   'update:teacher',
   'update:admin',
   'update:classTime',
+  'update:classTimeSlot',
   'update:courseContent',
   'update:newStudentName',
   'add-student',
@@ -63,7 +66,7 @@ const emit = defineEmits([
   'open-course-manager',
 ]);
 
-const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl);
+const photoSectionOpen = computed(() => props.lessonType === 'retail' || !!props.previewUrl);
 </script>
 
 <template>
@@ -74,7 +77,7 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
         class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 active:bg-slate-50"
         @click="emit('back')"
       >
-        ‹ 返回
+        ‹ 日详情
       </button>
       <h2 class="flex-1 text-center text-base font-semibold text-slate-900 truncate">
         {{ isEditMode ? '编辑课程' : '添加课程' }}
@@ -99,6 +102,7 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
       :preview-url="previewUrl"
       :show-batch="false"
       :require-photo="lessonType === 'retail'"
+      :error-text="formErrors.photo"
       @pick-photo="emit('pick-photo', $event)"
     />
 
@@ -113,9 +117,13 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
       :time-slot-suggestions="timeSlotSuggestions"
       :lock-lesson-date="true"
       :show-datetime="!!datetimeDisplay"
+      :error-course="formErrors.course"
+      :lesson-type="lessonType"
+      :class-time-slot="classTimeSlot"
       @update:course="emit('update:course', $event)"
       @update:lesson-schedule="emit('update:lessonSchedule', $event)"
       @update:lesson-date="emit('update:lessonDate', $event)"
+      @update:class-time-slot="emit('update:classTimeSlot', $event)"
       @open-course-manager="emit('open-course-manager')"
     />
 
@@ -142,6 +150,8 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
       :class-hours="classHours"
       :fee-rate="feeRate"
       :head-count="headCount"
+      :error-class-hours="formErrors.classHours"
+      :error-fee-rate="formErrors.feeRate"
       @update:class-hours="emit('update:classHours', $event)"
       @update:fee-rate="emit('update:feeRate', $event)"
       @update:head-count="emit('update:headCount', $event)"
@@ -163,6 +173,8 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
         :admin="admin"
         :class-time="classTime"
         :course-content="courseContent"
+        :error-teacher="formErrors.teacher"
+        :error-course-content="formErrors.courseContent"
         @update:teacher="emit('update:teacher', $event)"
         @update:admin="emit('update:admin', $event)"
         @update:class-time="emit('update:classTime', $event)"
@@ -172,6 +184,7 @@ const photoSectionOpen = ref(props.lessonType === 'retail' || !!props.previewUrl
         <StudentManager
           :students="students"
           :new-student-name="newStudentName"
+          :error-text="formErrors.students"
           @update:new-student-name="emit('update:newStudentName', $event)"
           @add-student="emit('add-student')"
           @remove-student="emit('remove-student', $event)"

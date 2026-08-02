@@ -84,6 +84,20 @@ export function shiftYearMonth(ym, delta) {
   return `${y}-${pad2(mo + 1)}`;
 }
 
+/**
+ * 中文星期名映射（周日=0，周一=1，…）
+ */
+export const WEEKDAY_CHINESE = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/**
+ * 将 ISO 日期转换为中文星期名
+ */
+export function getIsoDateWeekday(isoDate) {
+  if (!isoDate) return '';
+  const d = new Date(isoDate + 'T00:00:00');
+  return WEEKDAY_CHINESE[d.getDay()];
+}
+
 export function buildCalendarCells(yearMonth) {
   const m = /^(\d{4})-(\d{2})$/.exec(String(yearMonth || '').trim());
   if (!m) return [];

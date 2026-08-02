@@ -1,3 +1,6 @@
 node_modules
 dist
+dist-*
 .npm-cache
+.workbuddy/
+vite.config.js.timestamp-*

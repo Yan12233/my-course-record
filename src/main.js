@@ -1,13 +1,17 @@
-import { createApp } from 'vue';
-import { registerSW } from 'virtual:pwa-register';
-import App from './App.vue';
-import './style.css';
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import { registerSW } from 'virtual:pwa-register'
+import router from './router'
+import App from './App.vue'
+import './style.css'
 
-registerSW({ immediate: true });
+registerSW({ immediate: true })
 
 window.addEventListener('vite:preloadError', () => {
-  // 新版本发布后，旧入口引用到失效 chunk 时，自动刷新以加载最新资源。
-  window.location.reload();
-});
+  window.location.reload()
+})
 
-createApp(App).mount('#app');
+const app = createApp(App)
+app.use(createPinia())
+app.use(router)
+app.mount('#app')

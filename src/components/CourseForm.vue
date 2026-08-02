@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
+import TimeWheelPicker from './TimeWheelPicker.vue';
 
 const props = defineProps({
   course: { type: String, default: '' },
@@ -10,12 +11,16 @@ const props = defineProps({
   timeSlotSuggestions: { type: Array, default: () => [] },
   lockLessonDate: { type: Boolean, default: false },
   showDatetime: { type: Boolean, default: true },
+  errorCourse: { type: String, default: '' },
+  lessonType: { type: String, default: 'regular' },
+  classTimeSlot: { type: Object, default: () => ({ start: '', end: '' }) },
 });
 
 const emit = defineEmits([
   'update:course',
   'update:lessonSchedule',
   'update:lessonDate',
+  'update:classTimeSlot',
   'open-date-picker',
   'open-course-manager',
 ]);
@@ -80,27 +85,46 @@ watch(() => props.course, (val) => {
         />
       </template>
       <p class="text-xs text-slate-400">从已设置的课程中选择，如需新类别请选择「自定义」或到「更多 → 管理课程」中添加。</p>
+      <p v-if="errorCourse" class="text-xs font-medium text-rose-600">{{ errorCourse }}</p>
     </section>
 
-    <section class="space-y-2">
-      <label for="lessonScheduleInput" class="block text-sm font-medium text-slate-700">班级名称 / 零售课说明</label>
+    <!-- 常规课：班级名称 -->
+    <section v-if="lessonType !== 'retail'" class="space-y-2">
+      <label for="lessonScheduleInput" class="block text-sm font-medium text-slate-700">班级名称</label>
       <input
         id="lessonScheduleInput"
         type="text"
         name="lessonSchedule"
-        list="timeSlotSuggestions"
         inputmode="text"
         maxlength="120"
-        placeholder="常规课：xx学校初一x班；零售课：上课时间段"
+        placeholder="如：xx学校初一3班"
         autocomplete="off"
         class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         :value="props.lessonSchedule"
         @input="emit('update:lessonSchedule', $event.target.value)"
       />
-      <datalist id="timeSlotSuggestions">
-        <option v-for="item in timeSlotSuggestions" :key="item" :value="item" />
-      </datalist>
-      <p class="text-xs text-slate-400">常规课仅填班级名；零售课请填时间段，并在上方补充课程名。</p>
+      <p class="text-xs text-slate-400">常规课请填写班级名称。</p>
+    </section>
+
+    <!-- 零售课：滚轮时间选择器 + 备注 -->
+    <section v-else class="space-y-2">
+      <span class="block text-sm font-medium text-slate-700">上课时间段</span>
+      <TimeWheelPicker
+        :model-value="props.classTimeSlot"
+        @update:model-value="emit('update:classTimeSlot', $event)"
+      />
+      <label for="retailNoteInput" class="mt-3 block text-sm font-medium text-slate-700">班级名称 / 备注（可选）</label>
+      <input
+        id="retailNoteInput"
+        type="text"
+        inputmode="text"
+        maxlength="120"
+        placeholder="如：一对一 / 小班名称（可选）"
+        autocomplete="off"
+        class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+        :value="props.lessonSchedule"
+        @input="emit('update:lessonSchedule', $event.target.value)"
+      />
     </section>
 
     <section v-if="!lockLessonDate" class="space-y-2">

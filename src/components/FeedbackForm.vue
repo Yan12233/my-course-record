@@ -4,6 +4,8 @@ const props = defineProps({
   admin: { type: String, default: '林玲' },
   classTime: { type: String, default: '' },
   courseContent: { type: String, default: '' },
+  errorTeacher: { type: String, default: '' },
+  errorCourseContent: { type: String, default: '' },
 });
 
 const emit = defineEmits([
@@ -29,10 +31,12 @@ const emit = defineEmits([
           maxlength="40"
           placeholder="请输入教师姓名"
           autocomplete="off"
-          class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          class="w-full rounded-xl border px-3 py-2.5 text-sm outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          :class="errorTeacher ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
           :value="props.teacher"
           @input="emit('update:teacher', $event.target.value)"
         />
+        <p v-if="errorTeacher" class="mt-0.5 text-xs font-medium text-rose-600">{{ errorTeacher }}</p>
       </label>
       <label class="text-sm text-slate-700">
         <span class="mb-1 block font-medium">咨询教务</span>
@@ -67,10 +71,12 @@ const emit = defineEmits([
         id="courseContentInput"
         rows="4"
         placeholder="请输入本节课授课内容..."
-        class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+        class="w-full rounded-xl border px-4 py-3 text-sm outline-none ring-0 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+        :class="errorCourseContent ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
         :value="props.courseContent"
         @input="emit('update:courseContent', $event.target.value)"
       />
+      <p v-if="errorCourseContent" class="mt-0.5 text-xs font-medium text-rose-600">{{ errorCourseContent }}</p>
     </div>
   </section>
 </template>

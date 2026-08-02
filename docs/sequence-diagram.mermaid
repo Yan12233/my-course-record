@@ -1,0 +1,207 @@
+%% 排课→考勤→课时扣减 关键时序图
+%% 来源：docs/ARCHITECTURE-teaching-mgmt.md 第 4 节
+
+%% 4.1 拖拽排课 + 冲突检测流程
+sequenceDiagram
+    participant U as 用户
+    participant SC as ScheduleCard.vue
+    participant SG as ScheduleGrid.vue
+    participant SV as ScheduleView.vue
+    participant SS as useScheduleStore
+    participant SES as ScheduleEditorSheet.vue
+
+    U->>SC: 长按排课卡片 300ms
+    SC->>SC: touchstart 记录起点<br/>启动 300ms 定时器
+    SC->>SC: 定时器触发<br/>设置 dragging=true
+    SC->>SC: 卡片半透明 + position:fixed 跟随手指
+    Note over SC,SG: touchmove 持续更新卡片位置
+
+    SC->>SG: document.elementFromPoint(x, y)<br/>检测当前手指下方的网格格
+    SG->>SG: 目标格高亮边框
+    Note over SC,SG: 用户拖动到目标格
+
+    U->>SC: 松手 touchend
+    SC->>SC: dragging=false<br/>恢复卡片原位
+    SC->>SV: emit('drop', { itemId, targetWeekday, targetSlot })
+
+    alt 目标格与源格相同（未移动）
+        SV->>SV: 忽略，无操作
+    else 移动到新格子
+        SV->>SS: updateItem(itemId, item => {<br/>  item.weekday = targetWeekday<br/>  item.slot = targetSlot<br/>})
+        SS->>SS: checkConflict(teacher, classroom,<br/>targetWeekday, targetSlot, itemId)
+
+        alt 无冲突
+            SS->>SS: useSchedule.setScheduleList(updatedItems)
+            SS-->>SV: 更新成功
+            SV->>SV: showToast('排课已更新')
+        else 教师冲突
+            SS-->>SV: { teacherConflict: existingItem }
+            SV->>SV: showToast('教师[张三]在该时段已有[Python]课程', 'error')
+            SV->>SG: 冲突格子红色闪烁边框
+        else 教室冲突
+            SS-->>SV: { classroomConflict: existingItem }
+            SV->>SV: showToast('教室[101]在该时段已被占用', 'error')
+        end
+    end
+
+    Note over U,SES: 替代流程：点击空白格新建
+    U->>SG: 点击空白格
+    SG->>SV: emit('cell-click', { weekday, slot })
+    SV->>SES: 打开编辑表单（预填 weekday + slot）
+    U->>SES: 填写课程/教师/教室等
+    U->>SES: 点击保存
+    SES->>SV: emit('submit', formData)
+    SV->>SS: addItem(new ScheduleItem)
+    SS->>SS: checkConflict(...)
+    alt 无冲突
+        SS->>SS: useSchedule.setScheduleList([...items, newItem])
+        SS-->>SV: 保存成功
+    else 有冲突
+        SS-->>SV: 冲突信息
+        SV->>SV: showToast(冲突提示, 'error')
+    end
+
+%% ────────────────────────────────────────
+
+%% 4.2 排课→考勤任务生成流程
+sequenceDiagram
+    participant SV as ScheduleView
+    participant SS as useScheduleStore
+    participant AV as AttendanceView
+    participant AS as useAttendanceStore
+    participant UA as useAttendance
+    participant LF as localforage
+
+    Note over SV,SS: 排课数据已加载到 scheduleStore
+    SV->>SS: load() / addItem() / updateItem()
+    SS->>LF: getItem('schedule_v1')
+    LF-->>SS: ScheduleItem[]
+
+    Note over AV,AS: 用户切换到考勤子路由
+    AV->>AS: load()
+    AS->>LF: getItem('attendance_v1')
+    LF-->>AS: AttendanceRecord[]
+    AS->>LF: getItem('student_hour_accounts_v1')
+    LF-->>AS: StudentHourAccount[]
+
+    AV->>AS: generateTodayTasks()
+    AS->>SS: 读取 scheduleStore.items
+
+    Note over AS: 按当日星期匹配排课项
+    AS->>AS: const today = new Date().getDay()<br/>const weekday = TIMETABLE_WEEKDAYS[(today+6)%7]
+    AS->>AS: const matched = items.filter(<br/>  it => it.weekday === weekday<br/>)
+
+    loop 遍历匹配的排课项
+    AS->>UA: 检查当日是否已有考勤记录
+    UA->>LF: getAttendanceByScheduleItem(scheduleItemId, today)
+    
+    alt 无考勤记录（首次）
+        UA-->>AS: null
+        AS->>AS: 生成新任务:<br/>{ scheduleItemId, course, teacher,<br/>  classroom, slot, studentGroup,<br/>  existingRecord: null }
+    else 已有考勤记录
+        UA-->>AS: AttendanceRecord
+        AS->>AS: 生成任务并附带已有记录:<br/>{ ..., existingRecord }
+    end
+    end
+
+    AS-->>AV: todayTasks = AttendanceTask[]
+    AV->>AV: 渲染考勤任务列表
+
+%% ────────────────────────────────────────
+
+%% 4.3 签到→课时扣减流程
+sequenceDiagram
+    participant U as 用户
+    participant AC as AttendanceCheckIn.vue
+    participant AS as useAttendanceStore
+    participant UA as useAttendance
+    participant LF as localforage
+
+    Note over AC: 用户进入签到界面，显示学生列表
+    U->>AC: 点击学生"张三"的"签到"按钮
+    AC->>AS: checkIn(scheduleItemId, '张三', 'present')
+    
+    AS->>AS: 更新 todayTasks 中对应任务的<br/>records 数组（内存态）
+
+    alt 该学生首次签到（无课时账户）
+        AS->>AC: emit('needInitHours', { studentName, course })
+        AC->>U: 弹窗输入初始课时
+        U->>AC: 输入 20 课时并确认
+        AC->>AS: rechargeStudent('张三', 'Python', 20, '初始充值')
+        AS->>UA: rechargeHours(studentName, course, 20, note)
+        UA->>LF: 更新 student_hour_accounts_v1
+    end
+
+    Note over AC: 用户继续标记其他学生...
+    U->>AC: 点击"全部签到"
+    AC->>AS: checkInAll(scheduleItemId)
+    AS->>AS: 将所有未标记学生设为 'present'
+
+    Note over AC: 用户点击"保存考勤"
+    U->>AC: 点击保存
+    AC->>AS: saveAttendance(scheduleItemId)
+    
+    AS->>UA: saveAttendanceRecord(record)
+    UA->>LF: setItem('attendance_v1', [...records, record])
+
+    loop 遍历考勤记录中 status='present' 的学生
+        AS->>UA: deductHours(studentName, course, classHours)
+        Note over UA: classHours 从排课项或模板获取
+        UA->>LF: 更新 student_hour_accounts_v1:<br/>account.consumedHours += classHours<br/>account.remainingHours -= classHours
+    end
+
+    AS->>AS: 刷新 hourAccounts（从 LF 重新加载）
+    AS-->>AC: 保存完成
+    AC->>U: showToast('考勤已保存，课时已扣减')
+    AC->>AC: 返回考勤任务列表
+
+    Note over AS: 检查预警
+    AS->>AS: warningStudents = hourAccounts.filter(<br/>  a => a.remainingHours <= 4<br/>)
+    AS-->>AC: 更新预警标记
+
+%% ────────────────────────────────────────
+
+%% 4.4 路由切换流程（TeachingLayout → 子路由）
+sequenceDiagram
+    participant U as 用户
+    participant App as App.vue
+    participant TL as TeachingLayout.vue
+    participant R as Vue Router
+    participant CRV as CourseRecordsView
+    participant SV as ScheduleView
+    participant AV as AttendanceView
+    participant RV as ResourceView
+
+    Note over App: 底部 Tab 点击"教学"
+    U->>App: 点击底部"教学"Tab
+    App->>R: router.push('/teaching')
+    R->>R: 匹配 '/teaching' → redirect '/teaching/records'
+    R->>TL: 渲染 TeachingLayout<br/>meta.tab = 'teaching'（底部Tab高亮"教学"）
+
+    TL->>TL: 渲染 Segmented Control<br/>当前选中 = route.path 匹配的项
+    TL->>R: <router-view> 渲染子路由
+    R->>CRV: 加载 CourseRecordsView (/teaching/records)
+    CRV->>CRV: onMounted → 加载课程记录数据
+
+    Note over U,TL: 切换到排课
+    U->>TL: 点击"排课"
+    TL->>R: router.push('/teaching/schedule')
+    R->>SV: 加载 ScheduleView<br/>page-slide 过渡动画
+    SV->>SV: onMounted → scheduleStore.load()<br/>检查迁移 → 渲染网格
+
+    Note over U,TL: 切换到考勤
+    U->>TL: 点击"考勤"
+    TL->>R: router.push('/teaching/attendance')
+    R->>AV: 加载 AttendanceView
+    AV->>AV: onMounted → attendanceStore.load()<br/>→ attendanceStore.generateTodayTasks()
+
+    Note over U,TL: 切换到资源库
+    U->>TL: 点击"资源库"
+    TL->>R: router.push('/teaching/resources')
+    R->>RV: 加载 ResourceView
+    RV->>RV: onMounted → resourceStore.load()
+
+    Note over SV,CRV: 跨子路由通信（排课→录课）
+    SV->>R: router.push({<br/>  path: '/teaching/records',<br/>  query: { fromSchedule: itemId }<br/>})
+    R->>CRV: 加载 CourseRecordsView（带 query）
+    CRV->>CRV: onMounted 检测 route.query.fromSchedule<br/>→ 从 scheduleStore 读取该排课项<br/>→ 调用 onAddFromTimetable(scheduleItem)<br/>→ 进入录课编辑器

@@ -134,6 +134,8 @@ async function confirmNew() {
   });
   showNewDialog.value = false;
   await loadTemplates();
+  /* 保存后自动回到加载模式，方便立刻应用刚创建的模板 */
+  mode.value = 'load';
 }
 
 function cancelNew() {

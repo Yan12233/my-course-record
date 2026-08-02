@@ -18,6 +18,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  errorText: {
+    type: String,
+    default: '',
+  },
 });
 
 const emit = defineEmits(['pick-photo', 'pick-batch', 'open-batch-import']);
@@ -85,6 +89,9 @@ function openBatchPicker() {
     </button>
     <p class="text-center text-sm text-slate-500 truncate px-1">
       {{ photoHint }}
+    </p>
+    <p v-if="errorText" class="text-center text-xs font-medium text-rose-600 px-1">
+      {{ errorText }}
     </p>
     <div
       class="overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-sm"

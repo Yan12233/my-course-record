@@ -36,7 +36,12 @@ const emit = defineEmits(['update:lessonType']);
       </button>
     </div>
     <p class="text-xs text-slate-400 mt-2">
-      零售课需拍照、填写课堂反馈单；常规课可折叠，需要时再展开高级填写。
+      <template v-if="lessonType === 'retail'">
+        💡 零售课需拍照、填写课堂反馈单并添加学生
+      </template>
+      <template v-else>
+        常规课可快速录入课时费；需要时可展开高级填写
+      </template>
     </p>
   </section>
 </template>

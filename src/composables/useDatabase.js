@@ -13,9 +13,146 @@ const STORAGE_KEY_POINTS_TEACHER_NAME = 'points_teacher_name_v1';
 const STORAGE_KEY_POINTS_SCHOOL_NAMES = 'points_school_names_v1';
 const STORAGE_KEY_LESSON_TEMPLATES = 'lesson_templates_v1';
 const STORAGE_KEY_COURSE_LIST = 'course_list_v1';
-const TIMETABLE_WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const STORAGE_KEY_DEFAULT_TEACHER_NAME = 'default_teacher_name_v1';
+const STORAGE_KEY_SCHEDULE = 'schedule_v1';
+const STORAGE_KEY_ATTENDANCE = 'attendance_v1';
+const STORAGE_KEY_HOUR_ACCOUNTS = 'student_hour_accounts_v1';
+const STORAGE_KEY_RESOURCE_INDEX = 'resource_index_v1';
+const STORAGE_KEY_CLASSROOM_SUGGESTIONS = 'classroom_suggestions_v1';
+export const TIMETABLE_WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 let configured = false;
+
+/**
+ * 尝试从字符串中解析出两个 HH:mm 时间。
+ * 支持 "14:00-16:00"、"14:00—16:00"、"9:00-11:00" 等。
+ */
+function parseTimeString(text) {
+  const t = String(text == null ? '' : text).trim();
+  const m = /(\d{1,2}):(\d{2})\s*[-\u2014~\uff5e\u81f3\u5230\u5230]\s*(\d{1,2}):(\d{2})/.exec(t);
+  if (!m) return null;
+  const sh = parseInt(m[1], 10);
+  const sm = parseInt(m[2], 10);
+  const eh = parseInt(m[3], 10);
+  const em = parseInt(m[4], 10);
+  if (sh > 23 || eh > 23 || sm > 59 || em > 59) return null;
+  return [
+    `${String(sh).padStart(2, '0')}:${m[2]}`,
+    `${String(eh).padStart(2, '0')}:${m[4]}`,
+  ];
+}
+
+/**
+ * 把任意 slot 值（对象 / 字符串）解析为标准结构。
+ * 能解析 "HH:mm-HH:mm" 格式则返回 structured: true；
+ * 不能解析（如 "下午2点-4点"）则保留原文本，structured: false。
+ */
+export function normalizeSlot(slot) {
+  if (slot && typeof slot === 'object' && !Array.isArray(slot)) {
+    const start = String(slot.start || '').trim();
+    const end = String(slot.end || '').trim();
+    const raw = String(slot.raw || '').trim();
+    if (/^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(end)) {
+      return { start, end, raw: raw || `${start}-${end}`, structured: true };
+    }
+    if (raw) {
+      const parsed = parseTimeString(raw);
+      if (parsed) return { start: parsed[0], end: parsed[1], raw, structured: true };
+      return { start: '', end: '', raw, structured: false };
+    }
+    if (start || end) {
+      const ps = parseTimeString(`${start}-${end}`);
+      if (ps) return { start: ps[0], end: ps[1], raw: `${start}-${end}`, structured: true };
+    }
+    return { start: '', end: '', raw: '', structured: false };
+  }
+  const text = String(slot == null ? '' : slot).trim();
+  if (!text) return { start: '', end: '', raw: '', structured: false };
+  const parsed = parseTimeString(text);
+  if (parsed) return { start: parsed[0], end: parsed[1], raw: text, structured: true };
+  return { start: '', end: '', raw: text, structured: false };
+}
+
+/**
+ * 显示用格式化。structured 返回 "14:00-16:00"；非 structured 返回 raw 原文本。
+ */
+export function formatSlot(slot) {
+  const n = normalizeSlot(slot);
+  if (n.structured) return `${n.start}-${n.end}`;
+  return n.raw || '';
+}
+
+/**
+ * slotStartMinutes - 提取 slot 的开始时间（分钟数），用于排序
+ * @param {*} slot
+ * @returns {number} - 开始时间的分钟数，无法解析返回 Infinity（排最后）
+ */
+export function slotStartMinutes(slot) {
+  const n = normalizeSlot(slot);
+  if (!n.structured || !n.start) return Infinity;
+  const parts = n.start.split(':');
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+
+/**
+ * 将 "HH:mm" 转为中文时段描述，如 "14:00" → "下午2点"
+ */
+export function formatChineseTime(hhmm) {
+  const m = /^(\d{1,2}):\d{2}$/.exec(String(hhmm || '').trim());
+  if (!m) return '';
+  const h = parseInt(m[1], 10);
+  let period;
+  if (h >= 0 && h <= 5) period = '凌晨';
+  else if (h >= 6 && h <= 11) period = '上午';
+  else if (h === 12) period = '中午';
+  else if (h >= 13 && h <= 17) period = '下午';
+  else period = '晚上';
+  const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${period}${display}点`;
+}
+
+/**
+ * 将 slot 转为中文时间段描述，如 {start:"14:00",end:"16:00"} → "下午2点到4点"
+ * 同一时段（如上下午）省略第二个时段前缀。
+ */
+export function formatChineseSlot(slot) {
+  const n = normalizeSlot(slot);
+  if (!n.structured) return n.raw || '';
+
+  const startMin = parseInt(String(n.start || '').split(':')[0], 10);
+  const endMin = parseInt(String(n.end || '').split(':')[0], 10);
+  if (Number.isNaN(startMin) || Number.isNaN(endMin)) return n.raw || '';
+
+  function periodOf(h) {
+    if (h >= 0 && h <= 5) return '凌晨';
+    if (h >= 6 && h <= 11) return '上午';
+    if (h === 12) return '中午';
+    if (h >= 13 && h <= 17) return '下午';
+    return '晚上';
+  }
+
+  const displayHour = (h) => (h === 0 ? 12 : h > 12 ? h - 12 : h);
+
+  const sp = periodOf(startMin);
+  const ep = periodOf(endMin);
+
+  if (sp === ep) {
+    return `${sp}${displayHour(startMin)}点到${displayHour(endMin)}点`;
+  }
+  return `${sp}${displayHour(startMin)}点到${ep}${displayHour(endMin)}点`;
+}
+
+/**
+ * 生成唯一记录 ID
+ * 优先使用 crypto.randomUUID()，回退到时间戳+随机数
+ * @returns {string}
+ */
+export function generateRecordId() {
+  if (window.crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 export function useDatabase() {
   const { readFileAsDataURL } = useImageHandler();
@@ -28,13 +165,6 @@ export function useDatabase() {
       description: '上课记录（时间与课程及图片）',
     });
     configured = true;
-  }
-
-  function generateRecordId() {
-    if (window.crypto && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
   }
 
   function normalizeNonNegativeNumber(v) {
@@ -98,6 +228,9 @@ export function useDatabase() {
       classSchedule: String(raw.classSchedule || raw.lessonSchedule || '').trim(),
       teacher: String(raw.teacher || '').trim(),
       classTime: String(raw.classTime || '').trim(),
+      classTimeSlot: raw.classTimeSlot && typeof raw.classTimeSlot === 'object'
+        ? { start: String(raw.classTimeSlot.start || '').trim(), end: String(raw.classTimeSlot.end || '').trim() }
+        : null,
       admin: String(raw.admin || '林玲').trim() || '林玲',
       courseContent: String(raw.courseContent || '').trim(),
       students,
@@ -193,6 +326,9 @@ export function useDatabase() {
         typeof fd.classSchedule === 'string' ? fd.classSchedule.trim() : (lessonSchedule || ''),
       teacher: typeof fd.teacher === 'string' ? fd.teacher.trim() : '',
       classTime: typeof fd.classTime === 'string' ? fd.classTime.trim() : '',
+      classTimeSlot: fd.classTimeSlot && typeof fd.classTimeSlot === 'object' && fd.classTimeSlot.start
+        ? { start: String(fd.classTimeSlot.start).trim(), end: String(fd.classTimeSlot.end || '').trim() }
+        : null,
       admin: typeof fd.admin === 'string' ? fd.admin.trim() : '林玲',
       courseContent: typeof fd.courseContent === 'string' ? fd.courseContent.trim() : '',
       students: sanitizedStudents,
@@ -318,14 +454,26 @@ export function useDatabase() {
     if (!raw || typeof raw !== 'object') return null;
     const weekday = String(raw.weekday || '').trim();
     if (TIMETABLE_WEEKDAYS.indexOf(weekday) === -1) return null;
-    const slot = String(raw.slot || '').trim();
     const course = String(raw.course || '').trim();
-    if (!slot || !course) return null;
+    if (!course) return null;
+    /* slot 允许是对象 {start,end} 或字符串；统一存储为对象 {start,end} */
+    const n = normalizeSlot(raw.slot);
+    if (!n.structured && !n.raw) return null;
+    const slotObj = {
+      start: n.start || '',
+      end: n.end || '',
+    };
+    if (!n.structured && n.raw) {
+      slotObj.raw = n.raw;
+    }
+    const lessonType = raw.lessonType === 'retail' ? 'retail' : 'regular';
     return {
       id: raw.id ? String(raw.id) : generateRecordId(),
       weekday,
-      slot: slot.slice(0, 80),
+      slot: slotObj,
       course: course.slice(0, 80),
+      lessonType,
+      templateId: raw.templateId ? String(raw.templateId).trim() : '',
       updatedAt: typeof raw.updatedAt === 'number' && !Number.isNaN(raw.updatedAt) ? raw.updatedAt : Date.now(),
     };
   }
@@ -553,12 +701,281 @@ export function useDatabase() {
     return localforage.setItem(STORAGE_KEY_COURSE_LIST, safe).then(() => safe);
   }
 
+  /* ───── 默认教师姓名 ───── */
+
+  function getDefaultTeacherName() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_DEFAULT_TEACHER_NAME).then((val) => {
+      if (typeof val === 'string') return val;
+      return '';
+    });
+  }
+
+  function setDefaultTeacherName(name) {
+    ensureConfigured();
+    const v = String(name || '').trim();
+    return localforage.setItem(STORAGE_KEY_DEFAULT_TEACHER_NAME, v).then(() => v);
+  }
+
+  /* ───── 排课数据 (schedule_v1) ───── */
+
+  function sanitizeScheduleItem(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const weekday = String(raw.weekday || '').trim();
+    if (TIMETABLE_WEEKDAYS.indexOf(weekday) === -1) return null;
+    const course = String(raw.course || '').trim();
+    if (!course) return null;
+    const n = normalizeSlot(raw.slot);
+    if (!n.structured && !n.raw) return null;
+    const slotObj = { start: n.start || '', end: n.end || '' };
+    if (!n.structured && n.raw) slotObj.raw = n.raw;
+    const lessonType = raw.lessonType === 'retail' ? 'retail' : 'regular';
+    const studentGroup = Array.isArray(raw.studentGroup)
+      ? raw.studentGroup.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 50)
+      : [];
+    return {
+      id: raw.id ? String(raw.id) : generateRecordId(),
+      weekday,
+      slot: slotObj,
+      course: course.slice(0, 80),
+      teacher: String(raw.teacher || '').trim().slice(0, 40),
+      classroom: String(raw.classroom || '').trim().slice(0, 40),
+      studentGroup,
+      lessonType,
+      templateId: raw.templateId ? String(raw.templateId).trim() : '',
+      resourceId: raw.resourceId ? String(raw.resourceId).trim() : '',
+      updatedAt: typeof raw.updatedAt === 'number' && !Number.isNaN(raw.updatedAt) ? raw.updatedAt : Date.now(),
+    };
+  }
+
+  function getScheduleList() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_SCHEDULE).then((arr) => {
+      const list = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const one = sanitizeScheduleItem(list[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
+  }
+
+  function setScheduleList(list) {
+    ensureConfigured();
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeScheduleItem(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_SCHEDULE, safe).then(() => safe);
+  }
+
+  /* ───── 考勤数据 (attendance_v1) ───── */
+
+  function sanitizeAttendanceRecord(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const scheduleItemId = String(raw.scheduleItemId || '').trim();
+    if (!scheduleItemId) return null;
+    const date = String(raw.date || '').trim();
+    if (!date) return null;
+    const course = String(raw.course || '').trim();
+    if (!course) return null;
+    const records = [];
+    if (Array.isArray(raw.records)) {
+      for (let i = 0; i < raw.records.length; i++) {
+        const r = raw.records[i];
+        if (!r || typeof r !== 'object') continue;
+        const studentName = String(r.studentName || '').trim();
+        if (!studentName) continue;
+        const status = r.status === 'present' || r.status === 'leave' || r.status === 'absent'
+          ? r.status
+          : 'present';
+        records.push({
+          studentName: studentName.slice(0, 30),
+          status,
+          checkedAt: String(r.checkedAt || '').trim(),
+        });
+      }
+    }
+    return {
+      id: raw.id ? String(raw.id) : generateRecordId(),
+      scheduleItemId,
+      date,
+      course: course.slice(0, 80),
+      teacher: String(raw.teacher || '').trim().slice(0, 40),
+      records,
+      updatedAt: typeof raw.updatedAt === 'number' && !Number.isNaN(raw.updatedAt) ? raw.updatedAt : Date.now(),
+    };
+  }
+
+  function getAttendanceRecords() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_ATTENDANCE).then((arr) => {
+      const list = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const one = sanitizeAttendanceRecord(list[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
+  }
+
+  function setAttendanceRecords(list) {
+    ensureConfigured();
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeAttendanceRecord(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_ATTENDANCE, safe).then(() => safe);
+  }
+
+  /* ───── 课时账户 (student_hour_accounts_v1) ───── */
+
+  function sanitizeHourAccount(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const studentName = String(raw.studentName || '').trim();
+    if (!studentName) return null;
+    const course = String(raw.course || '').trim();
+    if (!course) return null;
+    const totalHours = normalizeNonNegativeNumber(raw.totalHours);
+    const consumedHours = normalizeNonNegativeNumber(raw.consumedHours);
+    const remainingHours = Math.max(0, normalizeNonNegativeNumber(raw.remainingHours != null ? raw.remainingHours : (totalHours - consumedHours)));
+    const rechargeHistory = [];
+    if (Array.isArray(raw.rechargeHistory)) {
+      for (let i = 0; i < raw.rechargeHistory.length; i++) {
+        const r = raw.rechargeHistory[i];
+        if (!r || typeof r !== 'object') continue;
+        rechargeHistory.push({
+          id: r.id ? String(r.id) : generateRecordId(),
+          hours: normalizeNonNegativeNumber(r.hours),
+          createdAt: typeof r.createdAt === 'number' && !Number.isNaN(r.createdAt) ? r.createdAt : Date.now(),
+          note: String(r.note || '').trim().slice(0, 200),
+        });
+      }
+    }
+    return {
+      id: raw.id ? String(raw.id) : generateRecordId(),
+      studentName: studentName.slice(0, 30),
+      course: course.slice(0, 80),
+      totalHours,
+      consumedHours,
+      remainingHours,
+      rechargeHistory,
+    };
+  }
+
+  function getHourAccounts() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_HOUR_ACCOUNTS).then((arr) => {
+      const list = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const one = sanitizeHourAccount(list[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
+  }
+
+  function setHourAccounts(list) {
+    ensureConfigured();
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeHourAccount(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_HOUR_ACCOUNTS, safe).then(() => safe);
+  }
+
+  /* ───── 资源库 (resource_index_v1) ───── */
+
+  function sanitizeResourceItem(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const title = String(raw.title || '').trim();
+    if (!title) return null;
+    const type = ['lesson_plan', 'courseware', 'exercise', 'other'].includes(raw.type)
+      ? raw.type
+      : 'other';
+    const tags = Array.isArray(raw.tags)
+      ? raw.tags.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 20)
+      : [];
+    const now = Date.now();
+    return {
+      id: raw.id ? String(raw.id) : generateRecordId(),
+      title: title.slice(0, 100),
+      subject: String(raw.subject || '').trim().slice(0, 50),
+      grade: String(raw.grade || '').trim().slice(0, 20),
+      type,
+      url: String(raw.url || '').trim().slice(0, 500),
+      description: String(raw.description || '').trim().slice(0, 2000),
+      tags,
+      createdAt: typeof raw.createdAt === 'number' && !Number.isNaN(raw.createdAt) ? raw.createdAt : now,
+      updatedAt: typeof raw.updatedAt === 'number' && !Number.isNaN(raw.updatedAt) ? raw.updatedAt : now,
+    };
+  }
+
+  function getResourceList() {
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_RESOURCE_INDEX).then((arr) => {
+      const list = Array.isArray(arr) ? arr : [];
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const one = sanitizeResourceItem(list[i]);
+        if (one) out.push(one);
+      }
+      return out;
+    });
+  }
+
+  function setResourceList(list) {
+    ensureConfigured();
+    const safe = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      const one = sanitizeResourceItem(arr[i]);
+      if (one) safe.push(one);
+    }
+    return localforage.setItem(STORAGE_KEY_RESOURCE_INDEX, safe).then(() => safe);
+  }
+
+  /* ───── 教室自动记忆 (classroom_suggestions_v1) ───── */
+
+  function getClassroomSuggestions() {
+    ensureConfigured();
+    return localforage
+      .getItem(STORAGE_KEY_CLASSROOM_SUGGESTIONS)
+      .then((arr) => (Array.isArray(arr) ? arr : []));
+  }
+
+  function rememberClassroom(value) {
+    const v = String(value || '').trim();
+    if (!v) return Promise.resolve([]);
+    ensureConfigured();
+    return localforage.getItem(STORAGE_KEY_CLASSROOM_SUGGESTIONS).then((arr) => {
+      const list = Array.isArray(arr) ? arr.slice() : [];
+      if (list.indexOf(v) !== -1) return list;
+      list.push(v);
+      return localforage.setItem(STORAGE_KEY_CLASSROOM_SUGGESTIONS, list).then(() => list);
+    });
+  }
+
   return {
     STORAGE_KEY_RECORDS,
     STORAGE_KEY_TIME_SLOT_SUGGESTIONS,
     STORAGE_KEY_TIMETABLE,
     STORAGE_KEY_COMMON_STUDENT_NAMES,
     STORAGE_KEY_FEEDBACK_DRAFT,
+    STORAGE_KEY_SCHEDULE,
+    STORAGE_KEY_ATTENDANCE,
+    STORAGE_KEY_HOUR_ACCOUNTS,
+    STORAGE_KEY_RESOURCE_INDEX,
+    STORAGE_KEY_CLASSROOM_SUGGESTIONS,
     TIMETABLE_WEEKDAYS,
     ensureConfigured,
     generateRecordId,
@@ -576,6 +993,11 @@ export function useDatabase() {
     getCommonStudentNames,
     setCommonStudentNames,
     sanitizeTimetableItem,
+    normalizeSlot,
+    formatSlot,
+    formatChineseSlot,
+    formatChineseTime,
+    slotStartMinutes,
     getTimetableList,
     setTimetableList,
     getFeedbackDraft,
@@ -594,5 +1016,21 @@ export function useDatabase() {
     deleteLessonTemplate,
     getCourseList,
     setCourseList,
+    getDefaultTeacherName,
+    setDefaultTeacherName,
+    sanitizeScheduleItem,
+    getScheduleList,
+    setScheduleList,
+    sanitizeAttendanceRecord,
+    getAttendanceRecords,
+    setAttendanceRecords,
+    sanitizeHourAccount,
+    getHourAccounts,
+    setHourAccounts,
+    sanitizeResourceItem,
+    getResourceList,
+    setResourceList,
+    getClassroomSuggestions,
+    rememberClassroom,
   };
 }

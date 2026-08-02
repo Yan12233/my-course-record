@@ -15,7 +15,23 @@ const STORAGE_KEY_SYNC_CONFIG = 'cloud_sync_config_v1';
 const STORAGE_KEY_SYNC_STATUS = 'cloud_sync_status_v1';
 const REMOTE_FILE_NAME = 'my-course-record-backup.json';
 
+/* ───── 扩展同步范围：新增模块的 localforage Key ───── */
+const STORAGE_KEY_SCHEDULE = 'schedule_v1';
+const STORAGE_KEY_ATTENDANCE = 'attendance_v1';
+const STORAGE_KEY_HOUR_ACCOUNTS = 'student_hour_accounts_v1';
+const STORAGE_KEY_RESOURCE_INDEX = 'resource_index_v1';
+
+/** 需要同步的全部 localforage Key 及其远程 JSON 字段名 */
+const SYNC_KEYS = [
+  { storageKey: 'course_records_v1', remoteField: 'records' },
+  { storageKey: STORAGE_KEY_SCHEDULE, remoteField: 'schedule' },
+  { storageKey: STORAGE_KEY_ATTENDANCE, remoteField: 'attendance' },
+  { storageKey: STORAGE_KEY_HOUR_ACCOUNTS, remoteField: 'hourAccounts' },
+  { storageKey: STORAGE_KEY_RESOURCE_INDEX, remoteField: 'resources' },
+];
+
 let localforage = null;
+let dataForage = null;
 
 async function getStore() {
   if (!localforage) {
@@ -27,6 +43,23 @@ async function getStore() {
     });
   }
   return localforage;
+}
+
+/**
+ * 获取业务数据存储实例（lesson_records object store）
+ * 与 useDatabase.js 使用相同的 name/storeName，确保读取同一份数据。
+ * 使用 createInstance 避免与 sync config store 互相干扰。
+ */
+async function getDataStore() {
+  if (!dataForage) {
+    const lf = (await import('localforage')).default;
+    dataForage = lf.createInstance({
+      name: 'MyCourseRecordH5',
+      storeName: 'lesson_records',
+      description: '上课记录（时间与课程及图片）',
+    });
+  }
+  return dataForage;
 }
 
 /**
@@ -218,6 +251,73 @@ function stripRecordsForSync(records) {
   return records.map(r => stripLargeFields(r));
 }
 
+/**
+ * 按 ID 合并两个数组，以 updatedAt 时间戳判断新旧。
+ * @param {Array} localArr - 本地数组
+ * @param {Array} remoteArr - 远程数组
+ * @returns {{ merged: Array, mergeCount: number }}
+ */
+function mergeById(localArr, remoteArr) {
+  const local = Array.isArray(localArr) ? localArr : [];
+  const remote = Array.isArray(remoteArr) ? remoteArr : [];
+  const map = new Map();
+  for (const r of local) {
+    if (r && r.id) map.set(r.id, { ...r });
+  }
+  let mergeCount = 0;
+  for (const r of remote) {
+    if (r && r.id) {
+      const existing = map.get(r.id);
+      if (!existing) {
+        map.set(r.id, { ...r });
+        mergeCount++;
+      } else if ((r.updatedAt || 0) > (existing.updatedAt || 0)) {
+        map.set(r.id, { ...existing, ...r });
+        mergeCount++;
+      }
+    }
+  }
+  return { merged: Array.from(map.values()), mergeCount };
+}
+
+/**
+ * 从 localforage 读取所有需同步的数据
+ * @returns {Promise<object>} { records, schedule, attendance, hourAccounts, resources }
+ */
+async function readAllLocalData(localRecords) {
+  const store = await getDataStore();
+  const schedule = await store.getItem(STORAGE_KEY_SCHEDULE).catch(() => []) || [];
+  const attendance = await store.getItem(STORAGE_KEY_ATTENDANCE).catch(() => []) || [];
+  const hourAccounts = await store.getItem(STORAGE_KEY_HOUR_ACCOUNTS).catch(() => []) || [];
+  const resources = await store.getItem(STORAGE_KEY_RESOURCE_INDEX).catch(() => []) || [];
+  return {
+    records: localRecords || [],
+    schedule: Array.isArray(schedule) ? schedule : [],
+    attendance: Array.isArray(attendance) ? attendance : [],
+    hourAccounts: Array.isArray(hourAccounts) ? hourAccounts : [],
+    resources: Array.isArray(resources) ? resources : [],
+  };
+}
+
+/**
+ * 将合并后的新模块数据写回 localforage
+ */
+async function writeMergedExtras(merged) {
+  const store = await getDataStore();
+  if (Array.isArray(merged.schedule)) {
+    await store.setItem(STORAGE_KEY_SCHEDULE, merged.schedule).catch(() => {});
+  }
+  if (Array.isArray(merged.attendance)) {
+    await store.setItem(STORAGE_KEY_ATTENDANCE, merged.attendance).catch(() => {});
+  }
+  if (Array.isArray(merged.hourAccounts)) {
+    await store.setItem(STORAGE_KEY_HOUR_ACCOUNTS, merged.hourAccounts).catch(() => {});
+  }
+  if (Array.isArray(merged.resources)) {
+    await store.setItem(STORAGE_KEY_RESOURCE_INDEX, merged.resources).catch(() => {});
+  }
+}
+
 /* ───── 同步 ───── */
 
 export async function syncRecords(serverUrl, username, password, localRecords) {
@@ -226,45 +326,65 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
   }
 
   try {
-    // 同步前剥离大字段（图片），只上传文本数据
-    const strippedLocal = stripRecordsForSync(localRecords);
+    // 读取所有需同步的本地数据
+    const allLocal = await readAllLocalData(localRecords);
 
-    let remoteRecords = [];
+    // 同步前剥离大字段（图片），只上传文本数据
+    const strippedLocal = stripRecordsForSync(allLocal.records);
+
+    let remoteData = null;
     let isFirstSync = false;
     try {
       const remote = await downloadFromWebDAV(serverUrl, username, password);
-      if (remote && Array.isArray(remote)) {
-        remoteRecords = remote;
+      if (remote && typeof remote === 'object') {
+        if (Array.isArray(remote)) {
+          // 旧格式：纯数组 → 仅包含 course_records
+          remoteData = { records: remote, schedule: [], attendance: [], hourAccounts: [], resources: [] };
+        } else {
+          // 新格式：结构化对象
+          remoteData = {
+            records: Array.isArray(remote.records) ? remote.records : [],
+            schedule: Array.isArray(remote.schedule) ? remote.schedule : [],
+            attendance: Array.isArray(remote.attendance) ? remote.attendance : [],
+            hourAccounts: Array.isArray(remote.hourAccounts) ? remote.hourAccounts : [],
+            resources: Array.isArray(remote.resources) ? remote.resources : [],
+          };
+        }
       } else {
         isFirstSync = true;
       }
     } catch (downloadErr) {
-      if (!strippedLocal.length) {
+      if (!strippedLocal.length && !allLocal.schedule.length && !allLocal.attendance.length) {
         const msg = `首次同步失败：${downloadErr.message}`;
         await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: false, lastSyncMessage: msg });
         return { ok: false, message: msg, records: localRecords };
       }
-      await uploadToWebDAV(serverUrl, username, password, strippedLocal);
+      // 首次上传：包含所有本地数据
+      const uploadPayload = {
+        records: strippedLocal,
+        schedule: allLocal.schedule,
+        attendance: allLocal.attendance,
+        hourAccounts: allLocal.hourAccounts,
+        resources: allLocal.resources,
+      };
+      await uploadToWebDAV(serverUrl, username, password, uploadPayload);
       await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: true, lastSyncMessage: '已上传本地数据' });
       return { ok: true, message: '已上传本地数据', records: localRecords };
     }
 
-    // 合并：以本地完整记录（含图片）为基础，用云端文本记录覆盖
+    // ── 合并 course_records（保留图片字段逻辑）──
     const mergedMap = new Map();
-    for (const r of localRecords) {
+    for (const r of allLocal.records) {
       if (r && r.id) mergedMap.set(r.id, { ...r });
     }
-
-    let mergeCount = 0;
-    for (const r of remoteRecords) {
+    let recordsMergeCount = 0;
+    for (const r of remoteData.records) {
       if (r && r.id) {
         const existing = mergedMap.get(r.id);
         if (!existing) {
-          // 云端独有的记录（文本-only）
           mergedMap.set(r.id, { ...r });
-          mergeCount++;
+          recordsMergeCount++;
         } else if ((r.updatedAt || 0) > (existing.updatedAt || 0)) {
-          // 云端更新 → 覆盖文本字段，保留本地图片
           const merged = { ...existing, ...r };
           if (existing.imageBase64 && !r.imageBase64) {
             merged.imageBase64 = existing.imageBase64;
@@ -272,20 +392,43 @@ export async function syncRecords(serverUrl, username, password, localRecords) {
             merged.imageMimeType = existing.imageMimeType;
           }
           mergedMap.set(r.id, merged);
-          mergeCount++;
+          recordsMergeCount++;
         }
       }
     }
-
     const mergedRecords = Array.from(mergedMap.values());
 
-    // 上传文本版本到云端
-    const strippedMerged = stripRecordsForSync(mergedRecords);
-    await uploadToWebDAV(serverUrl, username, password, strippedMerged);
+    // ── 合并新模块数据（各 key 独立按 ID 合并）──
+    const scheduleMerge = mergeById(allLocal.schedule, remoteData.schedule);
+    const attendanceMerge = mergeById(allLocal.attendance, remoteData.attendance);
+    const hourAccountsMerge = mergeById(allLocal.hourAccounts, remoteData.hourAccounts);
+    const resourcesMerge = mergeById(allLocal.resources, remoteData.resources);
 
+    // 将合并后的新模块数据写回 localforage
+    const mergedExtras = {
+      schedule: scheduleMerge.merged,
+      attendance: attendanceMerge.merged,
+      hourAccounts: hourAccountsMerge.merged,
+      resources: resourcesMerge.merged,
+    };
+    await writeMergedExtras(mergedExtras);
+
+    // 上传文本版本到云端（结构化对象）
+    const strippedMerged = stripRecordsForSync(mergedRecords);
+    const uploadPayload = {
+      records: strippedMerged,
+      schedule: mergedExtras.schedule,
+      attendance: mergedExtras.attendance,
+      hourAccounts: mergedExtras.hourAccounts,
+      resources: mergedExtras.resources,
+    };
+    await uploadToWebDAV(serverUrl, username, password, uploadPayload);
+
+    const totalMergeCount = recordsMergeCount + scheduleMerge.mergeCount +
+      attendanceMerge.mergeCount + hourAccountsMerge.mergeCount + resourcesMerge.mergeCount;
     const msg = isFirstSync
       ? `首次同步完成，已上传 ${mergedRecords.length} 条记录`
-      : `同步完成，合并 ${mergeCount} 条更新，共 ${mergedRecords.length} 条记录`;
+      : `同步完成，合并 ${totalMergeCount} 条更新，共 ${mergedRecords.length} 条记录`;
 
     await saveSyncStatus({ lastSyncAt: Date.now(), lastSyncOk: true, lastSyncMessage: msg });
     return { ok: true, message: msg, records: mergedRecords };

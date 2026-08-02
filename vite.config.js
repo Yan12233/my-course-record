@@ -10,14 +10,24 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: [],
       manifest: {
-        name: '上课记录助手',
-        short_name: '上课记录',
-        description: '上课记录、课表管理、批量补录与导出的一体化离线工具。',
+        name: '教师工作台',
+        short_name: '工作台',
+        description: '教培管理一站式工具：排课、考勤、课时统计、课程记录、资源库',
         start_url: '/',
         scope: '/',
         display: 'standalone',
+        display_override: ['standalone', 'minimal-ui'],
+        orientation: 'portrait',
         theme_color: '#4f46e5',
-        background_color: '#f1f5f9'
+        background_color: '#f1f5f9',
+        icons: [
+          {
+            src: 'icon.svg',
+            sizes: '512x512',
+            type: 'image/svg+xml',
+            purpose: 'any maskable',
+          },
+        ],
       },
       workbox: {
         cleanupOutdatedCaches: true,
@@ -31,12 +41,12 @@ export default defineConfig({
               cacheName: 'app-static-cache',
               expiration: {
                 maxEntries: 120,
-                maxAgeSeconds: 60 * 60 * 24 * 14
-              }
-            }
-          }
-        ]
-      }
-    })
-  ]
+                maxAgeSeconds: 60 * 60 * 24 * 14,
+              },
+            },
+          },
+        ],
+      },
+    }),
+  ],
 });

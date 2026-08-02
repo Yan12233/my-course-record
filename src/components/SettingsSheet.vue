@@ -14,6 +14,7 @@ defineProps({
   pointsTeacherName: { type: String, default: '' },
   exportingPoints: { type: Boolean, default: false },
   nonTeachingItems: { type: Array, default: () => [] },
+  defaultTeacherName: { type: String, default: '' },
 });
 
 const emit = defineEmits([
@@ -39,6 +40,7 @@ const emit = defineEmits([
   'add-non-teaching',
   'remove-non-teaching',
   'update-non-teaching',
+  'update:defaultTeacherName',
 ]);
 </script>
 
@@ -73,10 +75,10 @@ const emit = defineEmits([
         </button>
         <button
           type="button"
-          class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-600 active:bg-slate-50"
-          @click="emit('open-batch-import')"
+          class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-400 cursor-not-allowed"
+          disabled
         >
-          批量补录（开发中）
+          批量补录（即将推出）
         </button>
         <button
           type="button"
@@ -92,6 +94,21 @@ const emit = defineEmits([
         >
           ☁️ 云同步设置
         </button>
+      </div>
+
+      <div class="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <label class="block text-xs font-medium text-slate-500 mb-1">默认教师姓名</label>
+        <div class="flex gap-2">
+          <input
+            type="text"
+            maxlength="40"
+            placeholder="每次新建课程时自动填入此姓名"
+            class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            :value="defaultTeacherName"
+            @input="emit('update:defaultTeacherName', $event.target.value)"
+          />
+        </div>
+        <p class="mt-1 text-xs text-slate-400">预填后，每次添加本日课程时教师姓名将自动填入</p>
       </div>
 
       <RecordsLibrary

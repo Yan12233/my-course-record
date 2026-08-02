@@ -7,6 +7,8 @@ const props = defineProps({
   classHours: { type: [Number, String], default: '' },
   feeRate: { type: [Number, String], default: '' },
   headCount: { type: [Number, String], default: 1 },
+  errorClassHours: { type: String, default: '' },
+  errorFeeRate: { type: String, default: '' },
 });
 
 const emit = defineEmits(['update:classHours', 'update:feeRate', 'update:headCount']);
@@ -35,10 +37,12 @@ function onHeadCountChange(e) {
           inputmode="decimal"
           placeholder="如 2"
           autocomplete="off"
-          class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          class="w-full rounded-xl border px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          :class="errorClassHours ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
           :value="classHours"
-          @input="emit('update:classHours', $event.target.value)"
+          @input="emit('update:classHours', $event.target.value); if (errorClassHours) emit('update:classHours', $event.target.value)"
         />
+        <p v-if="errorClassHours" class="text-xs font-medium text-rose-600">{{ errorClassHours }}</p>
       </label>
       <div class="space-y-1">
         <span class="text-xs font-medium text-slate-700">上课人数</span>
@@ -75,10 +79,12 @@ function onHeadCountChange(e) {
           inputmode="decimal"
           placeholder="如 14"
           autocomplete="off"
-          class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          class="w-full rounded-xl border px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          :class="errorFeeRate ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
           :value="feeRate"
           @input="emit('update:feeRate', $event.target.value)"
         />
+        <p v-if="errorFeeRate" class="text-xs font-medium text-rose-600">{{ errorFeeRate }}</p>
       </label>
       <p class="text-xs text-slate-500">零售课课时费 = 课时 × 人数 × 每人每课时费用</p>
     </template>
@@ -92,10 +98,12 @@ function onHeadCountChange(e) {
             inputmode="decimal"
             placeholder="如 1.5"
             autocomplete="off"
-            class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            class="w-full rounded-xl border px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            :class="errorClassHours ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
             :value="classHours"
             @input="emit('update:classHours', $event.target.value)"
           />
+          <p v-if="errorClassHours" class="text-xs font-medium text-rose-600">{{ errorClassHours }}</p>
         </label>
         <label class="space-y-1">
           <span class="text-xs font-medium text-slate-700">单价（元/课时）</span>
@@ -104,10 +112,12 @@ function onHeadCountChange(e) {
             inputmode="decimal"
             placeholder="如 60"
             autocomplete="off"
-            class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            class="w-full rounded-xl border px-3 py-2.5 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            :class="errorFeeRate ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'"
             :value="feeRate"
             @input="emit('update:feeRate', $event.target.value)"
           />
+          <p v-if="errorFeeRate" class="text-xs font-medium text-rose-600">{{ errorFeeRate }}</p>
         </label>
       </div>
       <p class="text-xs text-slate-500">常规课课时费 = 课时 × 单价</p>

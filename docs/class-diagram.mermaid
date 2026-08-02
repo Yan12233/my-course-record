@@ -1,0 +1,201 @@
+%% 类图：数据结构 + Composable + Pinia Store + 关系
+%% 来源：docs/ARCHITECTURE-teaching-mgmt.md 第 3 节
+
+classDiagram
+    class ScheduleItem {
+        +string id
+        +string weekday
+        +Slot slot
+        +string course
+        +string teacher
+        +string classroom
+        +string[] studentGroup
+        +string lessonType
+        +string templateId
+        +string resourceId
+        +number updatedAt
+    }
+
+    class Slot {
+        +string start
+        +string end
+    }
+
+    class AttendanceRecord {
+        +string id
+        +string scheduleItemId
+        +string date
+        +string course
+        +string teacher
+        +AttendanceStudentRecord[] records
+        +number updatedAt
+    }
+
+    class AttendanceStudentRecord {
+        +string studentName
+        +string status
+        +string checkedAt
+    }
+
+    class StudentHourAccount {
+        +string id
+        +string studentName
+        +string course
+        +number totalHours
+        +number consumedHours
+        +number remainingHours
+        +RechargeRecord[] rechargeHistory
+    }
+
+    class RechargeRecord {
+        +string id
+        +number hours
+        +number createdAt
+        +string note
+    }
+
+    class ResourceItem {
+        +string id
+        +string title
+        +string subject
+        +string grade
+        +string type
+        +string url
+        +string description
+        +string[] tags
+        +number createdAt
+        +number updatedAt
+    }
+
+    class useScheduleStore {
+        +Ref~ScheduleItem[]~ items
+        +Ref~boolean~ loaded
+        +Computed~ScheduleItem[]~ todayItems
+        +load() Promise~void~
+        +addItem(ScheduleItem) Promise~ScheduleItem~
+        +updateItem(string, Function) Promise~void~
+        +removeItem(string) Promise~void~
+        +checkConflict(string, string, string, Slot, string) object
+        +getItemsByWeekday(string) ScheduleItem[]
+        +migrateIfNeeded() Promise~void~
+    }
+
+    class useAttendanceStore {
+        +Ref~AttendanceRecord[]~ records
+        +Ref~StudentHourAccount[]~ hourAccounts
+        +Ref~AttendanceTask[]~ todayTasks
+        +Ref~boolean~ loaded
+        +Computed~array~ warningStudents
+        +Computed~object~ todayStats
+        +load() Promise~void~
+        +generateTodayTasks() Promise~void~
+        +checkIn(string, string, string) Promise~void~
+        +checkInAll(string) Promise~void~
+        +saveAttendance(string) Promise~void~
+        +rechargeStudent(string, string, number, string) Promise~void~
+    }
+
+    class useResourceStore {
+        +Ref~ResourceItem[]~ items
+        +Ref~boolean~ loaded
+        +Computed~string[]~ subjects
+        +Computed~string[]~ grades
+        +load() Promise~void~
+        +addItem(ResourceItem) Promise~ResourceItem~
+        +updateItem(string, Function) Promise~void~
+        +removeItem(string) Promise~void~
+        +filter(object) ResourceItem[]
+        +search(string) ResourceItem[]
+    }
+
+    class useSchedule {
+        +getScheduleList() Promise~ScheduleItem[]~
+        +setScheduleList(ScheduleItem[]) Promise~ScheduleItem[]~
+        +sanitizeScheduleItem(any) ScheduleItem
+        +checkTeacherConflict(string, string, Slot, string) ScheduleItem
+        +checkClassroomConflict(string, string, Slot, string) ScheduleItem
+        +migrateFromTimetable() Promise~object~
+        +getTodayScheduleItems() Promise~ScheduleItem[]~
+        +getScheduleByWeekday(string) ScheduleItem[]
+    }
+
+    class useAttendance {
+        +getAttendanceRecords() Promise~AttendanceRecord[]~
+        +setAttendanceRecords(AttendanceRecord[]) Promise~void~
+        +sanitizeAttendanceRecord(any) AttendanceRecord
+        +getHourAccounts() Promise~StudentHourAccount[]~
+        +setHourAccounts(StudentHourAccount[]) Promise~void~
+        +sanitizeHourAccount(any) StudentHourAccount
+        +generateTodayTasks(ScheduleItem[]) AttendanceTask[]
+        +saveAttendanceRecord(AttendanceRecord) Promise~AttendanceRecord~
+        +deductHours(string, string, number) Promise~void~
+        +rechargeHours(string, string, number, string) Promise~void~
+        +getWarningStudents(number) array
+        +getAttendanceStats(object) object
+    }
+
+    class useResource {
+        +getResourceList() Promise~ResourceItem[]~
+        +setResourceList(ResourceItem[]) Promise~void~
+        +sanitizeResourceItem(any) ResourceItem
+        +saveResource(ResourceItem) Promise~ResourceItem~
+        +deleteResource(string) Promise~void~
+        +filterResources(object) ResourceItem[]
+        +searchResources(string) ResourceItem[]
+    }
+
+    class useDatabase {
+        +STORAGE_KEY_SCHEDULE string
+        +STORAGE_KEY_ATTENDANCE string
+        +STORAGE_KEY_HOUR_ACCOUNTS string
+        +STORAGE_KEY_RESOURCE_INDEX string
+        +STORAGE_KEY_CLASSROOM_SUGGESTIONS string
+        +getScheduleList() Promise~ScheduleItem[]~
+        +setScheduleList(ScheduleItem[]) Promise~ScheduleItem[]~
+        +getAttendanceRecords() Promise~AttendanceRecord[]~
+        +setAttendanceRecords(AttendanceRecord[]) Promise~void~
+        +getHourAccounts() Promise~StudentHourAccount[]~
+        +setHourAccounts(StudentHourAccount[]) Promise~void~
+        +getResourceList() Promise~ResourceItem[]~
+        +setResourceList(ResourceItem[]) Promise~void~
+        +sanitizeScheduleItem(any) ScheduleItem
+        +sanitizeAttendanceRecord(any) AttendanceRecord
+        +sanitizeHourAccount(any) StudentHourAccount
+        +sanitizeResourceItem(any) ResourceItem
+        +getClassroomSuggestions() Promise~string[]~
+        +rememberClassroom(string) Promise~void~
+    }
+
+    class AttendanceTask {
+        +string scheduleItemId
+        +string course
+        +string teacher
+        +string classroom
+        +Slot slot
+        +string[] studentGroup
+        +AttendanceRecord existingRecord
+    }
+
+    %% 组合关系
+    ScheduleItem --> Slot
+    AttendanceRecord --> AttendanceStudentRecord : records[]
+    StudentHourAccount --> RechargeRecord : rechargeHistory[]
+
+    %% 依赖关系：Store 调用 Composable
+    useScheduleStore --> useSchedule : 调用持久化
+    useAttendanceStore --> useAttendance : 调用持久化
+    useResourceStore --> useResource : 调用持久化
+
+    %% 依赖关系：Composable 调用 useDatabase
+    useSchedule --> useDatabase : localforage CRUD
+    useAttendance --> useDatabase : localforage CRUD
+    useResource --> useDatabase : localforage CRUD
+
+    %% 跨模块依赖
+    useAttendanceStore --> useScheduleStore : 读取排课生成考勤任务
+    AttendanceTask --> AttendanceRecord : existingRecord
+
+    %% 数据关联
+    ScheduleItem ..> AttendanceRecord : scheduleItemId 关联
+    ScheduleItem ..> ResourceItem : resourceId 关联(P1)
+    AttendanceRecord ..> StudentHourAccount : 签到扣减课时

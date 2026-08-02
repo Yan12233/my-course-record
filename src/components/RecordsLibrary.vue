@@ -77,14 +77,14 @@ const emit = defineEmits([
       <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 active:bg-emerald-100"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 active:bg-slate-50"
           @click="emit('backup')"
         >
           备份 JSON
         </button>
         <button
           type="button"
-          class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 active:bg-amber-100"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 active:bg-slate-50"
           @click="emit('restore')"
         >
           恢复 JSON
@@ -133,7 +133,7 @@ const emit = defineEmits([
       </div>
     </section>
 
-    <section class="rounded-2xl border border-emerald-200 bg-emerald-50/40 px-4 py-4 shadow-sm space-y-3">
+    <section class="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 shadow-sm space-y-3">
       <h3 class="text-base font-semibold text-slate-900">课时费表格导出</h3>
       <p class="text-xs text-slate-500">导出 Excel，含常规课与零售课；零售课按「课时 × 人数 × 每人每课时费用」统计</p>
       <div class="space-y-2">
@@ -176,19 +176,19 @@ const emit = defineEmits([
       </div>
     </section>
 
-    <section class="rounded-2xl border border-purple-200 bg-purple-50/40 px-4 py-4 shadow-sm space-y-3">
+    <section class="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 shadow-sm space-y-3">
       <h3 class="text-base font-semibold text-slate-900">积分表导出</h3>
-      <p class="text-xs text-slate-500">生成教师个人月度考核积分表（校内课 1分/课时 · 零售课 0.3分/人/课时 · 试听 0.6分/人次）</p>
+      <p class="text-xs text-slate-500">生成教师个人月度考核积分表</p>
       <div class="flex gap-2">
         <input
           type="month"
-          class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+          class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
           :value="pointsMonth"
           @input="emit('update:pointsMonth', $event.target.value)"
         />
         <button
           type="button"
-          class="shrink-0 rounded-xl border border-purple-300 bg-white px-3 py-2.5 text-sm font-medium text-purple-800 active:bg-purple-50"
+          class="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 active:bg-slate-50"
           @click="emit('open-points-config')"
         >
           课程分类
@@ -199,7 +199,7 @@ const emit = defineEmits([
         <input
           type="text"
           placeholder="输入教师姓名（如：严嘉诚）"
-          class="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+          class="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
           :value="pointsTeacherName"
           @input="emit('update:pointsTeacherName', $event.target.value)"
         />
@@ -217,7 +217,7 @@ const emit = defineEmits([
             <input
               type="text"
               placeholder="内容"
-              class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-purple-400"
+              class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400"
               :value="item.content"
               @input="emit('update-non-teaching', { index: i, field: 'content', value: $event.target.value })"
             />
@@ -226,7 +226,7 @@ const emit = defineEmits([
               step="0.5"
               min="0"
               placeholder="小时"
-              class="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+              class="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-indigo-400"
               :value="item.hours"
               @input="emit('update-non-teaching', { index: i, field: 'hours', value: $event.target.value })"
             />
@@ -250,7 +250,7 @@ const emit = defineEmits([
       </details>
       <button
         type="button"
-        class="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white active:bg-purple-700 disabled:opacity-60"
+        class="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white active:bg-indigo-700 disabled:opacity-60"
         :disabled="exportingPoints"
         @click="emit('export-points')"
       >
